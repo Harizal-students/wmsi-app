@@ -5,7 +5,7 @@ import {
   Globe, Search, CheckCircle, XCircle, AlertTriangle, FileText, Palette, 
   RefreshCw, ChevronDown, TrendingUp, Award, Target, MousePointer, Lightbulb, 
   PieChart, Megaphone, LayoutGrid, Cpu, Beaker, Brain, Camera, Monitor, 
-  Smartphone, Shield, Database
+  Smartphone, Shield, Database, Zap
 } from 'lucide-react';
 import { saveAnalysisSession, AnalysisSession } from '@/lib/supabase';
 
@@ -27,8 +27,18 @@ export default function WMSI() {
   const [mobilePreviews, setMobilePreviews] = useState<string[]>([]);
   const desktopInputRef = useRef<HTMLInputElement>(null);
   const mobileInputRef = useRef<HTMLInputElement>(null);
-  const MAX_DESKTOP = 3;
-  const MAX_MOBILE = 2;
+  
+  // OPTIMIZED: Reduced max uploads for faster processing
+  const MAX_DESKTOP = 2; // Reduced from 3
+  const MAX_MOBILE = 1;  // Reduced from 2
+  
+  // OPTIMIZED: Aggressive compression settings for Vercel Free Tier
+  const COMPRESSION_CONFIG = {
+    maxWidth: 800,      // Reduced from 2000
+    maxHeight: 600,     // Reduced from 2000
+    quality: 0.6,       // Reduced from 0.8
+    maxSizeKB: 150      // Target max 150KB per image
+  };
 
   const methodologies = {
     seo: { name: "Keyword Ranking Analysis", formula: "SEO = Sum(Rank x Weight) / n", ref: "Moz Keyword Explorer" },
@@ -76,49 +86,82 @@ export default function WMSI() {
     }
   };
 
-  const compressImage = (file: File, maxSizeMB?: number): Promise<{base64: string; preview: string; mediaType: string; size: number}> => {
-    const maxSize = (maxSizeMB || 4) * 1024 * 1024;
-    return new Promise((resolve) => {
+  // OPTIMIZED: Aggressive image compression function
+  const compressImage = (file: File): Promise<{base64: string; preview: string; mediaType: string; size: number}> => {
+    return new Promise((resolve, reject) => {
       const reader = new FileReader();
+      
+      reader.onerror = () => reject(new Error('Failed to read file'));
+      
       reader.onload = (e) => {
         const img = new window.Image();
+        
+        img.onerror = () => reject(new Error('Failed to load image'));
+        
         img.onload = () => {
-          if (file.size <= maxSize) {
-            resolve({
-              base64: (e.target?.result as string).split(',')[1],
-              preview: e.target?.result as string,
-              mediaType: file.type,
-              size: file.size
-            });
-            return;
-          }
           const canvas = document.createElement('canvas');
           const ctx = canvas.getContext('2d');
+          
+          if (!ctx) {
+            reject(new Error('Failed to get canvas context'));
+            return;
+          }
+          
+          // Calculate new dimensions
           let w = img.width;
           let h = img.height;
-          const maxDim = 2000;
-          if (w > maxDim || h > maxDim) {
-            if (w > h) {
-              h = (h / w) * maxDim;
-              w = maxDim;
-            } else {
-              w = (w / h) * maxDim;
-              h = maxDim;
-            }
+          const { maxWidth, maxHeight } = COMPRESSION_CONFIG;
+          
+          // Scale down if needed
+          if (w > maxWidth || h > maxHeight) {
+            const ratio = Math.min(maxWidth / w, maxHeight / h);
+            w = Math.round(w * ratio);
+            h = Math.round(h * ratio);
           }
+          
           canvas.width = w;
           canvas.height = h;
-          ctx?.drawImage(img, 0, 0, w, h);
-          const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
+          
+          // Draw with white background (for transparency)
+          ctx.fillStyle = '#FFFFFF';
+          ctx.fillRect(0, 0, w, h);
+          ctx.drawImage(img, 0, 0, w, h);
+          
+          // Iterative compression to reach target size
+          let quality = COMPRESSION_CONFIG.quality;
+          let dataUrl = canvas.toDataURL('image/jpeg', quality);
+          let sizeKB = (dataUrl.length * 0.75) / 1024;
+          
+          // Reduce quality until under target size
+          while (sizeKB > COMPRESSION_CONFIG.maxSizeKB && quality > 0.3) {
+            quality -= 0.1;
+            dataUrl = canvas.toDataURL('image/jpeg', quality);
+            sizeKB = (dataUrl.length * 0.75) / 1024;
+          }
+          
+          // If still too large, reduce dimensions further
+          if (sizeKB > COMPRESSION_CONFIG.maxSizeKB) {
+            const scale = 0.7;
+            canvas.width = Math.round(w * scale);
+            canvas.height = Math.round(h * scale);
+            ctx.fillStyle = '#FFFFFF';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+            dataUrl = canvas.toDataURL('image/jpeg', 0.5);
+            sizeKB = (dataUrl.length * 0.75) / 1024;
+          }
+          
           resolve({
             base64: dataUrl.split(',')[1],
             preview: dataUrl,
             mediaType: 'image/jpeg',
-            size: dataUrl.length * 0.75
+            size: sizeKB * 1024
           });
         };
+        
         img.src = e.target?.result as string;
       };
+      
       reader.readAsDataURL(file);
     });
   };
@@ -127,11 +170,16 @@ export default function WMSI() {
     const files = Array.from(e.target.files || []).slice(0, MAX_DESKTOP - desktopScreenshots.length);
     for (const file of files) {
       if (file.type.startsWith('image/')) {
-        log('info', 'upload', 'Processing Desktop: ' + file.name);
-        const c = await compressImage(file);
-        log('success', 'upload', 'Desktop ready: ' + Math.round(c.size / 1024) + 'KB');
-        setDesktopScreenshots(prev => [...prev, { base64: c.base64, name: file.name, mediaType: c.mediaType, size: c.size }]);
-        setDesktopPreviews(prev => [...prev, c.preview]);
+        try {
+          log('info', 'upload', 'Compressing Desktop: ' + file.name + ' (' + Math.round(file.size/1024) + 'KB)');
+          const c = await compressImage(file);
+          const finalSizeKB = Math.round(c.size / 1024);
+          log('success', 'upload', 'Desktop ready: ' + finalSizeKB + 'KB (optimized for speed)');
+          setDesktopScreenshots(prev => [...prev, { base64: c.base64, name: file.name, mediaType: c.mediaType, size: c.size }]);
+          setDesktopPreviews(prev => [...prev, c.preview]);
+        } catch (err: any) {
+          log('error', 'upload', 'Failed to process: ' + err.message);
+        }
       }
     }
     if (desktopInputRef.current) {
@@ -143,11 +191,16 @@ export default function WMSI() {
     const files = Array.from(e.target.files || []).slice(0, MAX_MOBILE - mobileScreenshots.length);
     for (const file of files) {
       if (file.type.startsWith('image/')) {
-        log('info', 'upload', 'Processing Mobile: ' + file.name);
-        const c = await compressImage(file);
-        log('success', 'upload', 'Mobile ready: ' + Math.round(c.size / 1024) + 'KB');
-        setMobileScreenshots(prev => [...prev, { base64: c.base64, name: file.name, mediaType: c.mediaType, size: c.size }]);
-        setMobilePreviews(prev => [...prev, c.preview]);
+        try {
+          log('info', 'upload', 'Compressing Mobile: ' + file.name + ' (' + Math.round(file.size/1024) + 'KB)');
+          const c = await compressImage(file);
+          const finalSizeKB = Math.round(c.size / 1024);
+          log('success', 'upload', 'Mobile ready: ' + finalSizeKB + 'KB (optimized for speed)');
+          setMobileScreenshots(prev => [...prev, { base64: c.base64, name: file.name, mediaType: c.mediaType, size: c.size }]);
+          setMobilePreviews(prev => [...prev, c.preview]);
+        } catch (err: any) {
+          log('error', 'upload', 'Failed to process: ' + err.message);
+        }
       }
     }
     if (mobileInputRef.current) {
@@ -181,18 +234,32 @@ export default function WMSI() {
     setStage(id);
   };
 
-  const callClaude = async (messages: any[], task: string) => {
+  // OPTIMIZED: API call with timeout handling
+  const callClaude = async (messages: any[], task: string, timeoutMs: number = 9000) => {
     const start = Date.now();
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+    
     try {
       const res = await fetch('/api/analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages, task })
+        body: JSON.stringify({ messages, task }),
+        signal: controller.signal
       });
       
+      clearTimeout(timeoutId);
+      
       if (!res.ok) {
-        const errData = await res.json();
-        throw new Error(errData.error || 'API Error ' + res.status);
+        const errText = await res.text();
+        let errMsg = 'API Error ' + res.status;
+        try {
+          const errData = JSON.parse(errText);
+          errMsg = errData.error || errMsg;
+        } catch {
+          errMsg = errText.substring(0, 100) || errMsg;
+        }
+        throw new Error(errMsg);
       }
       
       const data = await res.json();
@@ -200,13 +267,24 @@ export default function WMSI() {
       log('success', 'api', task + ' (' + duration + 'ms)');
       return { success: true, content: data.content, duration: duration };
     } catch (e: any) {
-      log('error', 'api', task + ' failed: ' + e.message);
-      return { success: false, error: e.message };
+      clearTimeout(timeoutId);
+      const errMsg = e.name === 'AbortError' ? 'Request timeout - image may be too large' : e.message;
+      log('error', 'api', task + ' failed: ' + errMsg);
+      return { success: false, error: errMsg };
     }
   };
 
   const analyze = async () => {
     if (!url || desktopScreenshots.length === 0 || mobileScreenshots.length === 0) {
+      return;
+    }
+
+    // Check total image size
+    const totalSize = [...desktopScreenshots, ...mobileScreenshots].reduce((a, b) => a + b.size, 0);
+    const totalSizeKB = Math.round(totalSize / 1024);
+    
+    if (totalSizeKB > 500) {
+      setError('Total ukuran gambar terlalu besar (' + totalSizeKB + 'KB). Maksimal 500KB untuk performa optimal.');
       return;
     }
 
@@ -226,56 +304,84 @@ export default function WMSI() {
       // PHASE 1: INIT
       setStg('init');
       log('info', 'init', 'Memulai analisis: ' + nUrl);
-      log('info', 'init', 'Screenshots: ' + desktopScreenshots.length + ' Desktop + ' + mobileScreenshots.length + ' Mobile');
+      log('info', 'init', 'Screenshots: ' + desktopScreenshots.length + ' Desktop + ' + mobileScreenshots.length + ' Mobile (' + totalSizeKB + 'KB total)');
 
-      // PHASE 2: SEO
+      // PHASE 2: SEO (no images, fast)
       setStg('seo');
       log('info', 'seo', 'Menganalisis SEO dan Keywords...');
 
       const seoPrompt = `Kamu adalah SEO Expert. Analisis website ${nUrl} (domain: ${domain}). Identifikasi 5-8 kata kunci utama dengan estimasi ranking Google, volume, difficulty. Analisis On-Page SEO. Format JSON tanpa markdown: { "domain": "${domain}", "industri": "kategori", "keywords": [{"keyword": "kata", "estimatedRank": 15, "searchVolume": 1000, "difficulty": "Medium", "relevance": 9}], "onPageSEO": {"titleOptimization": {"score": 70, "reason": "penjelasan"}, "metaDescription": {"score": 65, "reason": "penjelasan"}, "urlStructure": {"score": 75, "reason": "penjelasan"}, "mobileReadiness": {"score": 70, "reason": "penjelasan"}, "technicalSEO": {"score": 65, "reason": "penjelasan"}}, "overallSEO": {"score": 68, "visibility": "Medium", "reason": "ringkasan"}, "topOpportunities": ["peluang1", "peluang2"], "criticalIssues": ["masalah1"] }`;
 
-      const seoResult = await callClaude([{ role: 'user', content: seoPrompt }], 'SEO Analysis');
+      const seoResult = await callClaude([{ role: 'user', content: seoPrompt }], 'SEO Analysis', 8000);
       const seo = seoResult.success ? (parseJSON(seoResult.content) || { overallSEO: { score: 65 } }) : { overallSEO: { score: 65 } };
       
       if (seo.overallSEO) {
         log('success', 'seo', 'SEO Score: ' + seo.overallSEO.score + '/100');
       }
 
-      // PHASE 3: UI/UX VISION
+      // PHASE 3: UI/UX VISION (with compressed images)
       setStg('ui');
-      log('info', 'ui', 'Analyzing ' + desktopScreenshots.length + ' Desktop + ' + mobileScreenshots.length + ' Mobile with Vision AI...');
+      log('info', 'ui', 'Analyzing with Vision AI (optimized images)...');
 
       const visionContent: any[] = [];
+      
+      // Add compressed desktop screenshots
       desktopScreenshots.forEach((img, i) => {
         visionContent.push({ type: 'text', text: '[DESKTOP ' + (i + 1) + ']' });
-        visionContent.push({ type: 'image', source: { type: 'base64', media_type: img.mediaType || 'image/jpeg', data: img.base64 } });
+        visionContent.push({ 
+          type: 'image', 
+          source: { 
+            type: 'base64', 
+            media_type: 'image/jpeg', 
+            data: img.base64 
+          } 
+        });
       });
+      
+      // Add compressed mobile screenshots
       mobileScreenshots.forEach((img, i) => {
         visionContent.push({ type: 'text', text: '[MOBILE ' + (i + 1) + ']' });
-        visionContent.push({ type: 'image', source: { type: 'base64', media_type: img.mediaType || 'image/jpeg', data: img.base64 } });
+        visionContent.push({ 
+          type: 'image', 
+          source: { 
+            type: 'base64', 
+            media_type: 'image/jpeg', 
+            data: img.base64 
+          } 
+        });
       });
 
-      const visionPrompt = `Kamu adalah UI/UX Expert. Analisis ${desktopScreenshots.length} screenshot DESKTOP dan ${mobileScreenshots.length} screenshot MOBILE dari website ${nUrl}. Gunakan Gestalt Principles, WCAG, Nielsen Heuristics. Analisis HANYA berdasarkan apa yang TERLIHAT. Format JSON tanpa markdown: { "desktop": { "hierarchy": {"score": 75, "reason": "penjelasan"}, "color": {"score": 70, "palette": ["#hex"], "reason": "penjelasan"}, "typography": {"score": 72, "reason": "penjelasan"}, "layout": {"score": 74, "reason": "penjelasan"}, "overall": 73, "strengths": ["kekuatan"], "weaknesses": ["kelemahan"] }, "mobile": { "hierarchy": {"score": 78, "reason": "penjelasan"}, "color": {"score": 72, "reason": "penjelasan"}, "typography": {"score": 75, "reason": "penjelasan"}, "layout": {"score": 76, "reason": "penjelasan"}, "touchTargets": {"score": 74, "reason": "penjelasan"}, "overall": 75, "strengths": ["kekuatan"], "weaknesses": ["kelemahan"] }, "responsive": { "consistency": 72, "reason": "penjelasan" }, "ux": { "heuristics": { "visibility": {"score": 7, "reason": "..."}, "match": {"score": 7, "reason": "..."}, "control": {"score": 6, "reason": "..."}, "consistency": {"score": 7, "reason": "..."}, "prevention": {"score": 6, "reason": "..."}, "recognition": {"score": 7, "reason": "..."}, "flexibility": {"score": 6, "reason": "..."}, "aesthetic": {"score": 7, "reason": "..."}, "recovery": {"score": 6, "reason": "..."}, "help": {"score": 6, "reason": "..."} }, "overall": 67 }, "ui": { "overall": 74, "desktopScore": 73, "mobileScore": 75, "maturity": "Standard" }, "visualEvidence": ["bukti1", "bukti2"] }`;
+      // OPTIMIZED: Shorter prompt for faster processing
+      const visionPrompt = `Analisis UI/UX screenshot website ${nUrl}. Format JSON singkat: { "desktop": { "hierarchy": {"score": 75, "reason": "singkat"}, "color": {"score": 70, "reason": "singkat"}, "typography": {"score": 72, "reason": "singkat"}, "layout": {"score": 74, "reason": "singkat"}, "overall": 73 }, "mobile": { "hierarchy": {"score": 78, "reason": "singkat"}, "touchTargets": {"score": 74, "reason": "singkat"}, "overall": 75 }, "ux": { "heuristics": { "visibility": {"score": 7}, "match": {"score": 7}, "control": {"score": 6}, "consistency": {"score": 7}, "prevention": {"score": 6}, "recognition": {"score": 7}, "flexibility": {"score": 6}, "aesthetic": {"score": 7}, "recovery": {"score": 6}, "help": {"score": 6} }, "overall": 67 }, "ui": { "overall": 74, "desktopScore": 73, "mobileScore": 75 } }`;
 
       visionContent.push({ type: 'text', text: visionPrompt });
 
-      const uiuxResult = await callClaude([{ role: 'user', content: visionContent }], 'UI/UX Vision');
+      const uiuxResult = await callClaude([{ role: 'user', content: visionContent }], 'UI/UX Vision', 9000);
       const uiux = uiuxResult.success ? (parseJSON(uiuxResult.content) || {}) : {};
 
+      // Handle Vision API failure gracefully
+      let uiScore = 70;
+      let uxScore = 70;
+      
       if (uiux.ui) {
-        log('success', 'ui', 'UI: ' + uiux.ui.overall + ' | UX: ' + (uiux.ux ? uiux.ux.overall : 70));
+        uiScore = uiux.ui.overall || 70;
+        uxScore = uiux.ux?.overall || 70;
+        log('success', 'ui', 'UI: ' + uiScore + ' | UX: ' + uxScore);
+      } else {
+        log('warning', 'ui', 'Vision API timeout - using estimated scores');
       }
 
-      // PHASE 4: MARKETING
+      // PHASE 4: MARKETING (no images, fast)
       setStg('mkt');
       log('info', 'mkt', 'Analyzing Marketing...');
 
-      const seoContext = seo.overallSEO ? 'SEO: ' + seo.overallSEO.score + '/100, Visibility: ' + seo.overallSEO.visibility : '';
-      const uiContext = uiux.ui ? 'UI: ' + uiux.ui.overall + ', UX: ' + (uiux.ux ? uiux.ux.overall : 70) : '';
+      const seoContext = seo.overallSEO ? 'SEO: ' + seo.overallSEO.score + '/100' : '';
+      const uiContext = 'UI: ' + uiScore + ', UX: ' + uxScore;
 
-      const mktPrompt = `Kamu adalah Marketing Strategist. Analisis marketing website ${nUrl}. Data: ${seoContext}. ${uiContext}. Gunakan Kotler 7Ps, AIDA, Stanford Credibility. Format JSON tanpa markdown: { "valueProp": {"score": 3.2, "reason": "penjelasan", "evidence": {"fromSEO": "bukti", "fromUI": "bukti"}}, "mix7p": {"overall": 3.1, "product": {"score": 3.3, "reason": "..."}, "price": {"score": 3.0, "reason": "..."}, "place": {"score": 3.2, "reason": "..."}, "promotion": {"score": 3.0, "reason": "..."}, "people": {"score": 3.1, "reason": "..."}, "process": {"score": 2.9, "reason": "..."}, "physicalEvidence": {"score": 3.2, "reason": "..."}}, "customerJourney": {"overall": 3.0, "attention": {"score": 3.2, "elements": ["elemen"]}, "interest": {"score": 3.0, "elements": ["elemen"]}, "desire": {"score": 2.8, "elements": ["elemen"]}, "action": {"score": 3.0, "ctas": ["CTA"]}}, "trust": {"score": 3.4, "signals": {"testimonials": false, "certifications": false, "contactInfo": true}, "reason": "penjelasan"}, "brand": {"score": 3.3, "maturity": "Developing", "reason": "penjelasan"}, "conversion": {"score": 2.8, "primaryCTA": {"detected": true, "text": "CTA"}, "barriers": ["hambatan"], "opportunities": ["peluang"]}, "overall": 3.1, "maturity": "Developing", "strengths": ["kekuatan1", "kekuatan2"], "gaps": ["kelemahan1", "kelemahan2"], "prioritizedActions": [{"priority": 1, "action": "aksi", "impact": "High", "effort": "Medium"}] }`;
+      // OPTIMIZED: Shorter marketing prompt
+      const mktPrompt = `Analisis marketing website ${nUrl}. Data: ${seoContext}. ${uiContext}. Format JSON singkat: { "valueProp": {"score": 3.2, "reason": "singkat"}, "mix7p": {"overall": 3.1}, "customerJourney": {"overall": 3.0, "attention": {"score": 3.2}, "interest": {"score": 3.0}, "desire": {"score": 2.8}, "action": {"score": 3.0}}, "trust": {"score": 3.4}, "brand": {"score": 3.3, "maturity": "Developing"}, "conversion": {"score": 2.8}, "overall": 3.1, "maturity": "Developing", "strengths": ["kekuatan1"], "gaps": ["kelemahan1"], "prioritizedActions": [{"priority": 1, "action": "aksi", "impact": "High", "effort": "Medium"}] }`;
 
-      const mktResult = await callClaude([{ role: 'user', content: mktPrompt }], 'Marketing');
+      const mktResult = await callClaude([{ role: 'user', content: mktPrompt }], 'Marketing', 8000);
       const mkt = mktResult.success ? (parseJSON(mktResult.content) || { overall: 3.0 }) : { overall: 3.0 };
 
       if (mkt.overall) {
@@ -286,8 +392,6 @@ export default function WMSI() {
       setStg('wq');
       log('info', 'wq', 'Calculating WebQual 4.0...');
 
-      const uiScore = uiux.ui ? uiux.ui.overall : 70;
-      const uxScore = uiux.ux ? uiux.ux.overall : 70;
       const seoScore = seo.overallSEO ? seo.overallSEO.score : 65;
       const mktScore = mkt.overall || 3.0;
 
@@ -312,9 +416,9 @@ export default function WMSI() {
         url: nUrl,
         domain: domain,
         duration: totalDuration,
-        seo: { ...seo, score: seo.overallSEO ? seo.overallSEO.score : 65 },
-        ui: { ...uiux.ui, desktop: uiux.desktop, mobile: uiux.mobile, responsive: uiux.responsive, visualEvidence: uiux.visualEvidence },
-        ux: uiux.ux || { overall: 70, heuristics: {} },
+        seo: { ...seo, score: seoScore },
+        ui: { ...uiux.ui, desktop: uiux.desktop, mobile: uiux.mobile, responsive: uiux.responsive, visualEvidence: uiux.visualEvidence, overall: uiScore },
+        ux: uiux.ux || { overall: uxScore, heuristics: {} },
         mkt: mkt,
         wq: {
           usability: { score: usability, pct: (usability / 5) * 100, source: 'UI + UX Average' },
@@ -327,7 +431,8 @@ export default function WMSI() {
           desktopCount: desktopScreenshots.length,
           mobileCount: mobileScreenshots.length,
           desktopPreviews: desktopPreviews,
-          mobilePreviews: mobilePreviews
+          mobilePreviews: mobilePreviews,
+          totalImageSizeKB: totalSizeKB
         },
         methodologies: methodologies
       };
@@ -416,6 +521,14 @@ export default function WMSI() {
         {!analyzing && !results && (
           <div style={{ background: '#fff', borderRadius: 16, padding: 24, boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)', marginBottom: 20 }}>
 
+            {/* Optimization Notice */}
+            <div style={{ background: '#eff6ff', borderRadius: 8, padding: 12, marginBottom: 20, border: '1px solid #bfdbfe', display: 'flex', alignItems: 'center', gap: 10 }}>
+              <Zap size={18} style={{ color: '#2563eb' }} />
+              <div style={{ fontSize: 12, color: '#1e40af' }}>
+                <strong>Optimized Mode:</strong> Gambar dikompresi otomatis untuk analisis cepat. Max {MAX_DESKTOP} Desktop + {MAX_MOBILE} Mobile.
+              </div>
+            </div>
+
             {/* URL Input */}
             <div style={{ marginBottom: 20 }}>
               <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 600, marginBottom: 8, fontSize: 14 }}>
@@ -438,7 +551,7 @@ export default function WMSI() {
 
               <div style={{ background: '#fefce8', borderRadius: 8, padding: 12, marginBottom: 16, border: '1px solid #fde047' }}>
                 <p style={{ fontSize: 12, color: '#854d0e', margin: 0 }}>
-                  <strong>Tips:</strong> Upload screenshot Desktop DAN Mobile untuk analisis lengkap. Gunakan DevTools (F12) untuk simulasi mobile.
+                  <strong>Tips:</strong> Upload screenshot Desktop DAN Mobile. Gambar akan dikompresi otomatis (~150KB/gambar).
                 </p>
               </div>
 
@@ -454,11 +567,13 @@ export default function WMSI() {
                   </div>
                   <div
                     onClick={() => desktopScreenshots.length < MAX_DESKTOP && desktopInputRef.current?.click()}
-                    style={{ border: '2px dashed #93c5fd', borderRadius: 8, padding: 20, textAlign: 'center', cursor: 'pointer', background: '#eff6ff' }}
+                    style={{ border: '2px dashed #93c5fd', borderRadius: 8, padding: 20, textAlign: 'center', cursor: desktopScreenshots.length < MAX_DESKTOP ? 'pointer' : 'not-allowed', background: '#eff6ff', opacity: desktopScreenshots.length >= MAX_DESKTOP ? 0.5 : 1 }}
                   >
                     <input type="file" ref={desktopInputRef} onChange={handleDesktopUpload} accept="image/*" multiple style={{ display: 'none' }} />
                     <Monitor size={32} style={{ color: '#3b82f6' }} />
-                    <p style={{ margin: '8px 0 0', fontWeight: 600, color: '#1e40af', fontSize: 13 }}>Click to Upload</p>
+                    <p style={{ margin: '8px 0 0', fontWeight: 600, color: '#1e40af', fontSize: 13 }}>
+                      {desktopScreenshots.length >= MAX_DESKTOP ? 'Max reached' : 'Click to Upload'}
+                    </p>
                   </div>
                   {desktopPreviews.length > 0 && (
                     <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
@@ -471,6 +586,9 @@ export default function WMSI() {
                           >
                             ×
                           </button>
+                          <div style={{ position: 'absolute', bottom: 2, left: 2, fontSize: 8, background: 'rgba(0,0,0,0.6)', color: '#fff', padding: '1px 4px', borderRadius: 3 }}>
+                            {Math.round(desktopScreenshots[i]?.size / 1024)}KB
+                          </div>
                         </div>
                       ))}
                     </div>
@@ -488,11 +606,13 @@ export default function WMSI() {
                   </div>
                   <div
                     onClick={() => mobileScreenshots.length < MAX_MOBILE && mobileInputRef.current?.click()}
-                    style={{ border: '2px dashed #c4b5fd', borderRadius: 8, padding: 20, textAlign: 'center', cursor: 'pointer', background: '#f5f3ff' }}
+                    style={{ border: '2px dashed #c4b5fd', borderRadius: 8, padding: 20, textAlign: 'center', cursor: mobileScreenshots.length < MAX_MOBILE ? 'pointer' : 'not-allowed', background: '#f5f3ff', opacity: mobileScreenshots.length >= MAX_MOBILE ? 0.5 : 1 }}
                   >
                     <input type="file" ref={mobileInputRef} onChange={handleMobileUpload} accept="image/*" multiple style={{ display: 'none' }} />
                     <Smartphone size={32} style={{ color: '#8b5cf6' }} />
-                    <p style={{ margin: '8px 0 0', fontWeight: 600, color: '#5b21b6', fontSize: 13 }}>Click to Upload</p>
+                    <p style={{ margin: '8px 0 0', fontWeight: 600, color: '#5b21b6', fontSize: 13 }}>
+                      {mobileScreenshots.length >= MAX_MOBILE ? 'Max reached' : 'Click to Upload'}
+                    </p>
                   </div>
                   {mobilePreviews.length > 0 && (
                     <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
@@ -505,6 +625,9 @@ export default function WMSI() {
                           >
                             ×
                           </button>
+                          <div style={{ position: 'absolute', bottom: 2, left: 2, fontSize: 7, background: 'rgba(0,0,0,0.6)', color: '#fff', padding: '1px 3px', borderRadius: 2 }}>
+                            {Math.round(mobileScreenshots[i]?.size / 1024)}KB
+                          </div>
                         </div>
                       ))}
                     </div>
@@ -522,6 +645,22 @@ export default function WMSI() {
                 {mobileScreenshots.length > 0 ? '✓ ' + mobileScreenshots.length + ' Mobile' : '⚠ Mobile required'}
               </div>
             </div>
+
+            {/* Total Size Indicator */}
+            {(desktopScreenshots.length > 0 || mobileScreenshots.length > 0) && (
+              <div style={{ 
+                padding: 10, 
+                background: [...desktopScreenshots, ...mobileScreenshots].reduce((a, b) => a + b.size, 0) / 1024 > 400 ? '#fef2f2' : '#f0fdf4', 
+                borderRadius: 8, 
+                textAlign: 'center', 
+                fontSize: 12, 
+                fontWeight: 500,
+                marginBottom: 16,
+                color: [...desktopScreenshots, ...mobileScreenshots].reduce((a, b) => a + b.size, 0) / 1024 > 400 ? '#991b1b' : '#166534'
+              }}>
+                Total: {Math.round([...desktopScreenshots, ...mobileScreenshots].reduce((a, b) => a + b.size, 0) / 1024)}KB / 500KB max
+              </div>
+            )}
 
             {/* Button */}
             <button
@@ -564,7 +703,7 @@ export default function WMSI() {
                   {stage ? stages.find(s => s.id === stage)?.name : 'Memproses...'}
                 </h3>
                 <p style={{ color: '#64748b', fontSize: 13, margin: '4px 0 0' }}>
-                  Menggunakan AI Vision dan metodologi ilmiah
+                  Optimized for fast analysis
                 </p>
               </div>
             </div>
@@ -613,6 +752,7 @@ export default function WMSI() {
                     <h2 style={{ fontSize: 20, fontWeight: 800, margin: 0 }}>WebQual 4.0 Score</h2>
                   </div>
                   <p style={{ opacity: 0.9, fontSize: 14, margin: 0 }}>{results.url}</p>
+                  <p style={{ opacity: 0.7, fontSize: 12, margin: '4px 0 0' }}>Analyzed in {(results.duration / 1000).toFixed(1)}s | Images: {results.metadata.totalImageSizeKB}KB</p>
                 </div>
                 <div style={{ textAlign: 'center' }}>
                   <div style={{ fontSize: 52, fontWeight: 800, lineHeight: 1 }}>{results.wq.overall.pct.toFixed(0)}%</div>
@@ -793,13 +933,13 @@ export default function WMSI() {
                     <div style={{ background: '#eff6ff', borderRadius: 12, padding: 20 }}>
                       <h4 style={{ fontSize: 16, fontWeight: 700, color: '#1e40af', marginBottom: 16 }}>Desktop UI: {results.ui.desktopScore || results.ui.overall}</h4>
                       {results.ui.desktop && (
-                        <p style={{ fontSize: 12, color: '#3b82f6' }}>{results.ui.desktop.hierarchy?.reason || 'Analisis visual hierarchy'}</p>
+                        <p style={{ fontSize: 12, color: '#3b82f6' }}>{results.ui.desktop.hierarchy?.reason || 'Visual hierarchy analysis'}</p>
                       )}
                     </div>
                     <div style={{ background: '#f5f3ff', borderRadius: 12, padding: 20 }}>
                       <h4 style={{ fontSize: 16, fontWeight: 700, color: '#5b21b6', marginBottom: 16 }}>Mobile UI: {results.ui.mobileScore || results.ui.overall}</h4>
                       {results.ui.mobile && (
-                        <p style={{ fontSize: 12, color: '#8b5cf6' }}>{results.ui.mobile.hierarchy?.reason || 'Analisis visual hierarchy mobile'}</p>
+                        <p style={{ fontSize: 12, color: '#8b5cf6' }}>{results.ui.mobile.hierarchy?.reason || 'Mobile hierarchy analysis'}</p>
                       )}
                     </div>
                   </div>
