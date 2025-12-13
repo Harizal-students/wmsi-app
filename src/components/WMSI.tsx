@@ -5,7 +5,7 @@ import {
   Globe, Search, XCircle, FileText, Palette, 
   RefreshCw, Award, MousePointer, 
   Megaphone, LayoutGrid, Beaker, Brain, Camera, Monitor, 
-  Smartphone, Shield, Database, AlertCircle
+  Smartphone, Shield, Database, AlertCircle, Upload, Cloud, CheckCircle
 } from 'lucide-react';
 import { saveAnalysisSession, AnalysisSession } from '@/lib/supabase';
 
@@ -20,14 +20,11 @@ export default function WMSI() {
   const [tab, setTab] = useState('overview');
   const [savedToDb, setSavedToDb] = useState(false);
 
-  const [desktopImg, setDesktopImg] = useState<{base64: string; preview: string; sizeKB: number} | null>(null);
-  const [mobileImg, setMobileImg] = useState<{base64: string; preview: string; sizeKB: number} | null>(null);
+  // Image states with Cloudinary URLs
+  const [desktopImg, setDesktopImg] = useState<{preview: string; cloudinaryUrl: string | null; uploading: boolean} | null>(null);
+  const [mobileImg, setMobileImg] = useState<{preview: string; cloudinaryUrl: string | null; uploading: boolean} | null>(null);
   const desktopRef = useRef<HTMLInputElement>(null);
   const mobileRef = useRef<HTMLInputElement>(null);
-
-  // EXTREME compression - target 30KB max per image
-  const MAX_SIZE_KB = 30;
-  const MAX_DIM = 400;
 
   const log = useCallback((type: string, msg: string) => {
     setLogs(prev => [...prev, { ts: new Date().toLocaleTimeString('id-ID'), type, msg }]);
@@ -55,8 +52,8 @@ export default function WMSI() {
     } catch { return null; }
   };
 
-  // EXTREME compression function
-  const compress = (file: File): Promise<{base64: string; preview: string; sizeKB: number}> => {
+  // Compress image before uploading to Cloudinary
+  const compressForUpload = (file: File): Promise<string> => {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.onerror = () => reject(new Error('Read failed'));
@@ -68,11 +65,14 @@ export default function WMSI() {
           const ctx = canvas.getContext('2d');
           if (!ctx) { reject(new Error('Canvas failed')); return; }
 
-          // Calculate small dimensions
+          // Compress to reasonable size for Cloudinary (max 1200px)
           let w = img.width, h = img.height;
-          const ratio = Math.min(MAX_DIM / w, MAX_DIM / h, 1);
-          w = Math.round(w * ratio);
-          h = Math.round(h * ratio);
+          const maxDim = 1200;
+          if (w > maxDim || h > maxDim) {
+            const ratio = Math.min(maxDim / w, maxDim / h);
+            w = Math.round(w * ratio);
+            h = Math.round(h * ratio);
+          }
 
           canvas.width = w;
           canvas.height = h;
@@ -80,41 +80,9 @@ export default function WMSI() {
           ctx.fillRect(0, 0, w, h);
           ctx.drawImage(img, 0, 0, w, h);
 
-          // Start with low quality and iterate
-          let q = 0.4;
-          let dataUrl = canvas.toDataURL('image/jpeg', q);
-          let sizeKB = (dataUrl.length * 0.75) / 1024;
-
-          // Reduce quality until under target
-          while (sizeKB > MAX_SIZE_KB && q > 0.1) {
-            q -= 0.05;
-            dataUrl = canvas.toDataURL('image/jpeg', q);
-            sizeKB = (dataUrl.length * 0.75) / 1024;
-          }
-
-          // If still too large, shrink dimensions
-          if (sizeKB > MAX_SIZE_KB) {
-            canvas.width = Math.round(w * 0.5);
-            canvas.height = Math.round(h * 0.5);
-            ctx.fillStyle = '#FFF';
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
-            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-            dataUrl = canvas.toDataURL('image/jpeg', 0.3);
-            sizeKB = (dataUrl.length * 0.75) / 1024;
-          }
-
-          // Final extreme fallback
-          if (sizeKB > MAX_SIZE_KB) {
-            canvas.width = 200;
-            canvas.height = 150;
-            ctx.fillStyle = '#FFF';
-            ctx.fillRect(0, 0, 200, 150);
-            ctx.drawImage(img, 0, 0, 200, 150);
-            dataUrl = canvas.toDataURL('image/jpeg', 0.2);
-            sizeKB = (dataUrl.length * 0.75) / 1024;
-          }
-
-          resolve({ base64: dataUrl.split(',')[1], preview: dataUrl, sizeKB: Math.round(sizeKB) });
+          // Medium quality for upload (Cloudinary will optimize further)
+          const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
+          resolve(dataUrl.split(',')[1]); // Return base64 only
         };
         img.src = e.target?.result as string;
       };
@@ -122,34 +90,77 @@ export default function WMSI() {
     });
   };
 
+  // Upload to Cloudinary
+  const uploadToCloudinary = async (base64: string, type: 'desktop' | 'mobile'): Promise<string> => {
+    const res = await fetch('/api/upload', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ image: base64, type })
+    });
+
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.error || 'Upload failed');
+    }
+
+    const data = await res.json();
+    return data.url;
+  };
+
   const handleDesktop = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file?.type.startsWith('image/')) return;
+    
     try {
-      log('info', `Compressing desktop (${Math.round(file.size/1024)}KB)...`);
-      const c = await compress(file);
-      log('success', `Desktop ready: ${c.sizeKB}KB`);
-      setDesktopImg(c);
-    } catch (err: any) { log('error', err.message); }
+      // Show preview immediately
+      const previewUrl = URL.createObjectURL(file);
+      setDesktopImg({ preview: previewUrl, cloudinaryUrl: null, uploading: true });
+      
+      log('info', `Uploading desktop to Cloudinary...`);
+      
+      // Compress and upload
+      const base64 = await compressForUpload(file);
+      const cloudinaryUrl = await uploadToCloudinary(base64, 'desktop');
+      
+      setDesktopImg(prev => prev ? { ...prev, cloudinaryUrl, uploading: false } : null);
+      log('success', `Desktop uploaded: ${cloudinaryUrl.substring(0, 50)}...`);
+      
+    } catch (err: any) {
+      log('error', `Desktop upload failed: ${err.message}`);
+      setDesktopImg(null);
+    }
+    
     if (desktopRef.current) desktopRef.current.value = '';
   };
 
   const handleMobile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file?.type.startsWith('image/')) return;
+    
     try {
-      log('info', `Compressing mobile (${Math.round(file.size/1024)}KB)...`);
-      const c = await compress(file);
-      log('success', `Mobile ready: ${c.sizeKB}KB`);
-      setMobileImg(c);
-    } catch (err: any) { log('error', err.message); }
+      const previewUrl = URL.createObjectURL(file);
+      setMobileImg({ preview: previewUrl, cloudinaryUrl: null, uploading: true });
+      
+      log('info', `Uploading mobile to Cloudinary...`);
+      
+      const base64 = await compressForUpload(file);
+      const cloudinaryUrl = await uploadToCloudinary(base64, 'mobile');
+      
+      setMobileImg(prev => prev ? { ...prev, cloudinaryUrl, uploading: false } : null);
+      log('success', `Mobile uploaded: ${cloudinaryUrl.substring(0, 50)}...`);
+      
+    } catch (err: any) {
+      log('error', `Mobile upload failed: ${err.message}`);
+      setMobileImg(null);
+    }
+    
     if (mobileRef.current) mobileRef.current.value = '';
   };
 
   const stages = [
     { id: 'init', name: 'Init', w: 5 },
     { id: 'seo', name: 'SEO', w: 25 },
-    { id: 'ui', name: 'UI/UX', w: 30 },
+    { id: 'ui', name: 'UI/UX Vision', w: 30 },
     { id: 'mkt', name: 'Marketing', w: 25 },
     { id: 'wq', name: 'WebQual', w: 10 },
     { id: 'done', name: 'Done', w: 5 }
@@ -163,25 +174,13 @@ export default function WMSI() {
 
   const callAPI = async (messages: any[], task: string) => {
     const start = Date.now();
-    const body = JSON.stringify({ messages, task });
-    const bodyKB = Math.round(body.length / 1024);
-    
-    log('info', `${task}: sending ${bodyKB}KB...`);
-    
-    // Vercel limit check
-    if (bodyKB > 4000) {
-      throw new Error(`Request too large (${bodyKB}KB). Max 4MB.`);
-    }
+    log('info', `${task}: calling Claude API...`);
 
     const res = await fetch('/api/analyze', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body
+      body: JSON.stringify({ messages, task })
     });
-
-    if (res.status === 413) {
-      throw new Error('413: Request too large. Please use smaller images.');
-    }
 
     if (!res.ok) {
       const txt = await res.text();
@@ -194,16 +193,7 @@ export default function WMSI() {
   };
 
   const analyze = async () => {
-    if (!url || !desktopImg || !mobileImg) return;
-
-    // Check total size
-    const totalKB = desktopImg.sizeKB + mobileImg.sizeKB;
-    const totalBase64KB = Math.round((desktopImg.base64.length + mobileImg.base64.length) / 1024);
-    
-    if (totalBase64KB > 200) {
-      setError(`Images too large (${totalBase64KB}KB base64). Max 200KB total.`);
-      return;
-    }
+    if (!url || !desktopImg?.cloudinaryUrl || !mobileImg?.cloudinaryUrl) return;
 
     setAnalyzing(true);
     setError(null);
@@ -220,11 +210,11 @@ export default function WMSI() {
 
       setStg('init');
       log('info', `Analyzing: ${nUrl}`);
-      log('info', `Images: ${totalBase64KB}KB base64`);
+      log('info', `Using Cloudinary URLs (no 413 error!)`);
 
-      // SEO Analysis (text only)
+      // SEO Analysis (text only - no images)
       setStg('seo');
-      const seoPrompt = `SEO analysis for ${nUrl}. JSON only: {"domain":"${domain}","keywords":[{"keyword":"word","rank":10}],"onPageSEO":{"title":70,"meta":65,"url":75,"mobile":70,"technical":65},"overallSEO":{"score":68,"visibility":"Medium"},"opportunities":["opp1"],"issues":["issue1"]}`;
+      const seoPrompt = `SEO analysis for ${nUrl}. Return JSON only: {"domain":"${domain}","keywords":[{"keyword":"word","rank":10}],"onPageSEO":{"title":70,"meta":65,"url":75,"mobile":70,"technical":65},"overallSEO":{"score":68,"visibility":"Medium"},"opportunities":["opp1"],"issues":["issue1"]}`;
       
       let seo = { overallSEO: { score: 65, visibility: 'Medium' } };
       try {
@@ -235,17 +225,32 @@ export default function WMSI() {
         log('error', `SEO failed: ${e.message}`);
       }
 
-      // UI/UX Vision Analysis
+      // UI/UX Vision Analysis - using URLs instead of base64!
       setStg('ui');
       let uiScore = 70, uxScore = 70;
       
       try {
         const visionContent = [
-          { type: 'text', text: '[DESKTOP]' },
-          { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: desktopImg.base64 } },
-          { type: 'text', text: '[MOBILE]' },
-          { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: mobileImg.base64 } },
-          { type: 'text', text: `UI/UX for ${nUrl}. JSON: {"ui":{"overall":74},"ux":{"overall":67},"desktop":75,"mobile":73}` }
+          { type: 'text', text: '[DESKTOP SCREENSHOT]' },
+          { 
+            type: 'image', 
+            source: { 
+              type: 'url', 
+              url: desktopImg.cloudinaryUrl 
+            } 
+          },
+          { type: 'text', text: '[MOBILE SCREENSHOT]' },
+          { 
+            type: 'image', 
+            source: { 
+              type: 'url', 
+              url: mobileImg.cloudinaryUrl 
+            } 
+          },
+          { 
+            type: 'text', 
+            text: `Analyze UI/UX for ${nUrl}. Return JSON: {"ui":{"overall":74,"desktop":75,"mobile":73,"hierarchy":{"score":75,"reason":"brief"},"color":{"score":72,"reason":"brief"},"typography":{"score":70,"reason":"brief"}},"ux":{"overall":67,"heuristics":{"visibility":7,"match":7,"control":6,"consistency":7,"prevention":6,"recognition":7,"flexibility":6,"aesthetic":7,"recovery":6,"help":6}},"strengths":["s1","s2"],"weaknesses":["w1","w2"]}` 
+          }
         ];
         
         const uiuxContent = await callAPI([{ role: 'user', content: visionContent }], 'Vision');
@@ -257,11 +262,11 @@ export default function WMSI() {
         log('warning', `Vision failed: ${e.message} - using defaults`);
       }
 
-      // Marketing Analysis (text only)
+      // Marketing Analysis
       setStg('mkt');
-      let mkt = { overall: 3.0 };
+      let mkt = { overall: 3.0, maturity: 'Developing' };
       try {
-        const mktPrompt = `Marketing for ${nUrl}. SEO:${seo.overallSEO?.score || 65}, UI:${uiScore}. JSON: {"valueProp":3.2,"mix7p":3.1,"journey":3.0,"trust":3.4,"brand":3.3,"overall":3.1,"maturity":"Developing","strengths":["s1"],"gaps":["g1"],"actions":[{"priority":1,"action":"a1","impact":"High"}]}`;
+        const mktPrompt = `Marketing analysis for ${nUrl}. Context: SEO=${seo.overallSEO?.score || 65}, UI=${uiScore}, UX=${uxScore}. Return JSON: {"valueProp":{"score":3.2,"reason":"brief"},"mix7p":{"overall":3.1,"product":3.2,"price":3.0,"place":3.1,"promotion":3.0,"people":3.1,"process":2.9,"physical":3.2},"journey":{"overall":3.0,"attention":3.2,"interest":3.0,"desire":2.8,"action":3.0},"trust":3.4,"brand":{"score":3.3,"maturity":"Developing"},"overall":3.1,"maturity":"Developing","strengths":["s1"],"gaps":["g1"],"actions":[{"priority":1,"action":"action","impact":"High","effort":"Medium"}]}`;
         const mktContent = await callAPI([{ role: 'user', content: mktPrompt }], 'Marketing');
         mkt = parseJSON(mktContent) || mkt;
         log('success', `Marketing: ${((mkt.overall || 3) * 20).toFixed(0)}%`);
@@ -299,9 +304,16 @@ export default function WMSI() {
           information: { score: information, pct: (information / 5) * 100 },
           service: { score: service, pct: (service / 5) * 100 },
           marketing: { score: marketing, pct: (marketing / 5) * 100 },
-          overall: { score: wqScore, pct: wqPct, calc: `WQ = U(${usability.toFixed(2)})*0.25 + I(${information.toFixed(2)})*0.25 + S(${service.toFixed(2)})*0.20 + M(${marketing.toFixed(2)})*0.30 = ${wqPct.toFixed(1)}%` }
+          overall: { 
+            score: wqScore, 
+            pct: wqPct, 
+            calc: `WQ = U(${usability.toFixed(2)})*0.25 + I(${information.toFixed(2)})*0.25 + S(${service.toFixed(2)})*0.20 + M(${marketing.toFixed(2)})*0.30 = ${wqPct.toFixed(1)}%` 
+          }
         },
-        meta: { desktopKB: desktopImg.sizeKB, mobileKB: mobileImg.sizeKB, totalBase64KB }
+        images: {
+          desktop: desktopImg.cloudinaryUrl,
+          mobile: mobileImg.cloudinaryUrl
+        }
       };
 
       setResults(finalResults);
@@ -367,7 +379,8 @@ export default function WMSI() {
     );
   };
 
-  const totalBase64KB = (desktopImg?.base64.length || 0) / 1024 + (mobileImg?.base64.length || 0) / 1024;
+  const canAnalyze = url && desktopImg?.cloudinaryUrl && mobileImg?.cloudinaryUrl;
+  const isUploading = desktopImg?.uploading || mobileImg?.uploading;
 
   return (
     <div style={{ minHeight: '100vh', background: 'linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%)', fontFamily: 'system-ui' }}>
@@ -376,29 +389,29 @@ export default function WMSI() {
         {/* Header */}
         <header style={{ textAlign: 'center', marginBottom: 24 }}>
           <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '6px 14px', background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 50, marginBottom: 12 }}>
-            <Beaker size={14} style={{ color: '#16a34a' }} />
-            <span style={{ fontSize: 12, fontWeight: 600, color: '#166534' }}>WebQual 4.0 + Vision AI</span>
+            <Cloud size={14} style={{ color: '#16a34a' }} />
+            <span style={{ fontSize: 12, fontWeight: 600, color: '#166534' }}>WebQual 4.0 + Vision AI + Cloudinary</span>
           </div>
           <h1 style={{ fontSize: 24, fontWeight: 800, color: '#0f172a', marginBottom: 4 }}>WMSI - Website Analysis</h1>
-          <p style={{ color: '#64748b', fontSize: 13 }}>SEO, UI/UX, Marketing Analysis</p>
+          <p style={{ color: '#64748b', fontSize: 13 }}>SEO, UI/UX, Marketing Analysis with Cloud Image Hosting</p>
         </header>
 
         {/* Input Form */}
         {!analyzing && !results && (
           <div style={{ background: '#fff', borderRadius: 16, padding: 24, boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)' }}>
 
-            {/* Warning */}
-            <div style={{ background: '#fef3c7', borderRadius: 8, padding: 12, marginBottom: 20, border: '1px solid #fde68a', display: 'flex', gap: 10 }}>
-              <AlertCircle size={18} style={{ color: '#d97706', flexShrink: 0 }} />
-              <div style={{ fontSize: 12, color: '#92400e' }}>
-                <strong>Vercel Free:</strong> Images auto-compressed to ~30KB. Quality reduced but analysis still works.
+            {/* Info */}
+            <div style={{ background: '#eff6ff', borderRadius: 8, padding: 12, marginBottom: 20, border: '1px solid #bfdbfe', display: 'flex', gap: 10 }}>
+              <Cloud size={18} style={{ color: '#2563eb', flexShrink: 0 }} />
+              <div style={{ fontSize: 12, color: '#1e40af' }}>
+                <strong>Cloudinary Mode:</strong> Images uploaded to cloud, then analyzed via URL. No more 413 errors!
               </div>
             </div>
 
             {/* URL */}
             <div style={{ marginBottom: 20 }}>
               <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 600, marginBottom: 8, fontSize: 14 }}>
-                <Globe size={18} style={{ color: '#0ea5e9' }} /> URL
+                <Globe size={18} style={{ color: '#0ea5e9' }} /> URL Website
               </label>
               <input
                 type="url"
@@ -412,47 +425,65 @@ export default function WMSI() {
             {/* Screenshots */}
             <div style={{ marginBottom: 20 }}>
               <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 600, marginBottom: 12, fontSize: 14 }}>
-                <Camera size={18} style={{ color: '#8b5cf6' }} /> Screenshots (Auto-Compressed)
+                <Camera size={18} style={{ color: '#8b5cf6' }} /> Screenshots (Auto-Upload to Cloudinary)
               </label>
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                 {/* Desktop */}
-                <div style={{ background: '#f8fafc', padding: 12, borderRadius: 10, border: desktopImg ? '2px solid #10b981' : '2px solid #3b82f6' }}>
+                <div style={{ background: '#f8fafc', padding: 12, borderRadius: 10, border: desktopImg?.cloudinaryUrl ? '2px solid #10b981' : '2px solid #3b82f6' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
                     <Monitor size={16} style={{ color: '#3b82f6' }} />
                     <span style={{ fontWeight: 600, fontSize: 13 }}>Desktop</span>
-                    {desktopImg && <span style={{ marginLeft: 'auto', fontSize: 11, color: '#10b981' }}>{desktopImg.sizeKB}KB ✓</span>}
+                    {desktopImg?.uploading && (
+                      <span style={{ marginLeft: 'auto', fontSize: 11, color: '#f59e0b', display: 'flex', alignItems: 'center', gap: 4 }}>
+                        <Upload size={12} className="animate-pulse" /> Uploading...
+                      </span>
+                    )}
+                    {desktopImg?.cloudinaryUrl && (
+                      <span style={{ marginLeft: 'auto', fontSize: 11, color: '#10b981', display: 'flex', alignItems: 'center', gap: 4 }}>
+                        <CheckCircle size={12} /> Uploaded
+                      </span>
+                    )}
                   </div>
                   {!desktopImg ? (
                     <div onClick={() => desktopRef.current?.click()} style={{ border: '2px dashed #93c5fd', borderRadius: 6, padding: 16, textAlign: 'center', cursor: 'pointer', background: '#eff6ff' }}>
                       <input type="file" ref={desktopRef} onChange={handleDesktop} accept="image/*" style={{ display: 'none' }} />
-                      <Monitor size={24} style={{ color: '#3b82f6' }} />
+                      <Upload size={24} style={{ color: '#3b82f6' }} />
                       <p style={{ margin: '4px 0 0', fontSize: 12, color: '#1e40af' }}>Click to upload</p>
                     </div>
                   ) : (
                     <div style={{ position: 'relative' }}>
-                      <img src={desktopImg.preview} alt="" style={{ width: '100%', height: 80, objectFit: 'cover', borderRadius: 6 }} />
+                      <img src={desktopImg.preview} alt="" style={{ width: '100%', height: 80, objectFit: 'cover', borderRadius: 6, opacity: desktopImg.uploading ? 0.5 : 1 }} />
                       <button onClick={() => setDesktopImg(null)} style={{ position: 'absolute', top: 4, right: 4, width: 20, height: 20, borderRadius: 50, background: '#ef4444', border: 'none', cursor: 'pointer', color: '#fff', fontSize: 12 }}>×</button>
                     </div>
                   )}
                 </div>
 
                 {/* Mobile */}
-                <div style={{ background: '#f8fafc', padding: 12, borderRadius: 10, border: mobileImg ? '2px solid #10b981' : '2px solid #8b5cf6' }}>
+                <div style={{ background: '#f8fafc', padding: 12, borderRadius: 10, border: mobileImg?.cloudinaryUrl ? '2px solid #10b981' : '2px solid #8b5cf6' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
                     <Smartphone size={16} style={{ color: '#8b5cf6' }} />
                     <span style={{ fontWeight: 600, fontSize: 13 }}>Mobile</span>
-                    {mobileImg && <span style={{ marginLeft: 'auto', fontSize: 11, color: '#10b981' }}>{mobileImg.sizeKB}KB ✓</span>}
+                    {mobileImg?.uploading && (
+                      <span style={{ marginLeft: 'auto', fontSize: 11, color: '#f59e0b', display: 'flex', alignItems: 'center', gap: 4 }}>
+                        <Upload size={12} /> Uploading...
+                      </span>
+                    )}
+                    {mobileImg?.cloudinaryUrl && (
+                      <span style={{ marginLeft: 'auto', fontSize: 11, color: '#10b981', display: 'flex', alignItems: 'center', gap: 4 }}>
+                        <CheckCircle size={12} /> Uploaded
+                      </span>
+                    )}
                   </div>
                   {!mobileImg ? (
                     <div onClick={() => mobileRef.current?.click()} style={{ border: '2px dashed #c4b5fd', borderRadius: 6, padding: 16, textAlign: 'center', cursor: 'pointer', background: '#f5f3ff' }}>
                       <input type="file" ref={mobileRef} onChange={handleMobile} accept="image/*" style={{ display: 'none' }} />
-                      <Smartphone size={24} style={{ color: '#8b5cf6' }} />
+                      <Upload size={24} style={{ color: '#8b5cf6' }} />
                       <p style={{ margin: '4px 0 0', fontSize: 12, color: '#5b21b6' }}>Click to upload</p>
                     </div>
                   ) : (
                     <div style={{ position: 'relative' }}>
-                      <img src={mobileImg.preview} alt="" style={{ width: '100%', height: 80, objectFit: 'cover', borderRadius: 6 }} />
+                      <img src={mobileImg.preview} alt="" style={{ width: '100%', height: 80, objectFit: 'cover', borderRadius: 6, opacity: mobileImg.uploading ? 0.5 : 1 }} />
                       <button onClick={() => setMobileImg(null)} style={{ position: 'absolute', top: 4, right: 4, width: 20, height: 20, borderRadius: 50, background: '#ef4444', border: 'none', cursor: 'pointer', color: '#fff', fontSize: 12 }}>×</button>
                     </div>
                   )}
@@ -460,26 +491,30 @@ export default function WMSI() {
               </div>
             </div>
 
-            {/* Size indicator */}
-            {(desktopImg || mobileImg) && (
-              <div style={{ padding: 8, background: totalBase64KB > 150 ? '#fef2f2' : '#f0fdf4', borderRadius: 6, textAlign: 'center', fontSize: 12, marginBottom: 16, color: totalBase64KB > 150 ? '#991b1b' : '#166534' }}>
-                Base64: {Math.round(totalBase64KB)}KB / 200KB max
+            {/* Status */}
+            <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+              <div style={{ flex: 1, padding: 8, background: desktopImg?.cloudinaryUrl ? '#dcfce7' : '#fef3c7', borderRadius: 6, textAlign: 'center', fontSize: 12 }}>
+                {desktopImg?.cloudinaryUrl ? '✓ Desktop ready' : desktopImg?.uploading ? '⏳ Uploading...' : '⚠ Need Desktop'}
               </div>
-            )}
+              <div style={{ flex: 1, padding: 8, background: mobileImg?.cloudinaryUrl ? '#dcfce7' : '#fef3c7', borderRadius: 6, textAlign: 'center', fontSize: 12 }}>
+                {mobileImg?.cloudinaryUrl ? '✓ Mobile ready' : mobileImg?.uploading ? '⏳ Uploading...' : '⚠ Need Mobile'}
+              </div>
+            </div>
 
             {/* Button */}
             <button
               onClick={analyze}
-              disabled={!url || !desktopImg || !mobileImg}
+              disabled={!canAnalyze || isUploading}
               style={{
                 width: '100%', padding: 14, fontSize: 15, fontWeight: 700, borderRadius: 10, border: 'none',
-                cursor: (url && desktopImg && mobileImg) ? 'pointer' : 'not-allowed',
-                background: (url && desktopImg && mobileImg) ? 'linear-gradient(135deg, #0ea5e9, #0284c7)' : '#e2e8f0',
-                color: (url && desktopImg && mobileImg) ? '#fff' : '#94a3b8',
+                cursor: (canAnalyze && !isUploading) ? 'pointer' : 'not-allowed',
+                background: (canAnalyze && !isUploading) ? 'linear-gradient(135deg, #0ea5e9, #0284c7)' : '#e2e8f0',
+                color: (canAnalyze && !isUploading) ? '#fff' : '#94a3b8',
                 display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8
               }}
             >
-              <Brain size={18} /> {(!url || !desktopImg || !mobileImg) ? 'Complete all fields' : 'Start Analysis'}
+              <Brain size={18} /> 
+              {isUploading ? 'Waiting for upload...' : !canAnalyze ? 'Complete all fields' : 'Start Analysis'}
             </button>
           </div>
         )}
@@ -494,7 +529,7 @@ export default function WMSI() {
               </div>
               <div>
                 <h3 style={{ fontWeight: 700, fontSize: 16, margin: 0 }}>{stage ? stages.find(s => s.id === stage)?.name : 'Processing...'}</h3>
-                <p style={{ color: '#64748b', fontSize: 12, margin: '4px 0 0' }}>Extreme compression mode</p>
+                <p style={{ color: '#64748b', fontSize: 12, margin: '4px 0 0' }}>Using Cloudinary URLs</p>
               </div>
             </div>
 
@@ -534,7 +569,7 @@ export default function WMSI() {
                     <h2 style={{ fontSize: 18, fontWeight: 800, margin: 0 }}>WebQual 4.0</h2>
                   </div>
                   <p style={{ opacity: 0.9, fontSize: 13, margin: 0 }}>{results.url}</p>
-                  <p style={{ opacity: 0.7, fontSize: 11, margin: '4px 0 0' }}>{(results.duration/1000).toFixed(1)}s | {results.meta.totalBase64KB}KB</p>
+                  <p style={{ opacity: 0.7, fontSize: 11, margin: '4px 0 0' }}>{(results.duration/1000).toFixed(1)}s | Cloudinary</p>
                 </div>
                 <div style={{ textAlign: 'center' }}>
                   <div style={{ fontSize: 44, fontWeight: 800 }}>{results.wq.overall.pct.toFixed(0)}%</div>
@@ -576,21 +611,38 @@ export default function WMSI() {
             {/* Tab Content */}
             <div style={{ background: '#fff', borderRadius: 14, padding: 20, minHeight: 200 }}>
               {tab === 'overview' && (
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
-                  <div style={{ background: '#f8fafc', borderRadius: 10, padding: 14, borderLeft: '4px solid #10b981' }}>
-                    <div style={{ fontSize: 12, color: '#64748b' }}>SEO</div>
-                    <div style={{ fontSize: 24, fontWeight: 700, color: '#10b981' }}>{results.seo.score}</div>
-                    <Bar v={results.seo.score} c="#10b981" h={4} />
+                <div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10, marginBottom: 16 }}>
+                    <div style={{ background: '#f8fafc', borderRadius: 10, padding: 14, borderLeft: '4px solid #10b981' }}>
+                      <div style={{ fontSize: 12, color: '#64748b' }}>SEO</div>
+                      <div style={{ fontSize: 24, fontWeight: 700, color: '#10b981' }}>{results.seo.score}</div>
+                      <Bar v={results.seo.score} c="#10b981" h={4} />
+                    </div>
+                    <div style={{ background: '#f8fafc', borderRadius: 10, padding: 14, borderLeft: '4px solid #3b82f6' }}>
+                      <div style={{ fontSize: 12, color: '#64748b' }}>UI</div>
+                      <div style={{ fontSize: 24, fontWeight: 700, color: '#3b82f6' }}>{results.ui.overall}</div>
+                      <Bar v={results.ui.overall} c="#3b82f6" h={4} />
+                    </div>
+                    <div style={{ background: '#f8fafc', borderRadius: 10, padding: 14, borderLeft: '4px solid #f59e0b' }}>
+                      <div style={{ fontSize: 12, color: '#64748b' }}>UX</div>
+                      <div style={{ fontSize: 24, fontWeight: 700, color: '#f59e0b' }}>{results.ux.overall}</div>
+                      <Bar v={results.ux.overall} c="#f59e0b" h={4} />
+                    </div>
                   </div>
-                  <div style={{ background: '#f8fafc', borderRadius: 10, padding: 14, borderLeft: '4px solid #3b82f6' }}>
-                    <div style={{ fontSize: 12, color: '#64748b' }}>UI</div>
-                    <div style={{ fontSize: 24, fontWeight: 700, color: '#3b82f6' }}>{results.ui.overall}</div>
-                    <Bar v={results.ui.overall} c="#3b82f6" h={4} />
-                  </div>
-                  <div style={{ background: '#f8fafc', borderRadius: 10, padding: 14, borderLeft: '4px solid #f59e0b' }}>
-                    <div style={{ fontSize: 12, color: '#64748b' }}>UX</div>
-                    <div style={{ fontSize: 24, fontWeight: 700, color: '#f59e0b' }}>{results.ux.overall}</div>
-                    <Bar v={results.ux.overall} c="#f59e0b" h={4} />
+                  
+                  {/* Screenshots from Cloudinary */}
+                  <div style={{ background: '#f8fafc', borderRadius: 10, padding: 12 }}>
+                    <h4 style={{ fontSize: 13, marginBottom: 8, color: '#64748b' }}>Analyzed Screenshots</h4>
+                    <div style={{ display: 'flex', gap: 12 }}>
+                      <div>
+                        <div style={{ fontSize: 11, color: '#3b82f6', marginBottom: 4 }}>Desktop</div>
+                        <img src={results.images.desktop} alt="Desktop" style={{ width: 150, height: 100, objectFit: 'cover', borderRadius: 6, border: '2px solid #93c5fd' }} />
+                      </div>
+                      <div>
+                        <div style={{ fontSize: 11, color: '#8b5cf6', marginBottom: 4 }}>Mobile</div>
+                        <img src={results.images.mobile} alt="Mobile" style={{ width: 60, height: 100, objectFit: 'cover', borderRadius: 6, border: '2px solid #c4b5fd' }} />
+                      </div>
+                    </div>
                   </div>
                 </div>
               )}
