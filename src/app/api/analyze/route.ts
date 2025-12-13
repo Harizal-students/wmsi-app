@@ -20,31 +20,18 @@ async function getKnowledgeBase(taskType: string) {
   try {
     const { data: bestExamples } = await supabase
       .from('analysis_sessions')
-      .select('domain, seo_score, webqual_score, seo_data, marketing_data')
+      .select('domain, webqual_score')
       .not('webqual_score', 'is', null)
-      .gte('webqual_score', 70)
-      .order('webqual_score', { ascending: false })
+      .gte('webqual_score', 75)
       .limit(2);
 
     if (!bestExamples || bestExamples.length === 0) return '';
-
-    const contextString = bestExamples.map((ex, i) => 
-      `[Benchmark ${i+1}] Domain: ${ex.domain} | WQ: ${ex.webqual_score}`
-    ).join('\n');
-
-    return `\n\n[INTERNAL BENCHMARKS]\n${contextString}\n`;
+    
+    // Context yang lebih ringkas agar hemat token
+    const contextString = bestExamples.map((ex, i) => `Ref${i+1}: ${ex.domain} (Score:${ex.webqual_score})`).join(', ');
+    return `Benchmarks: ${contextString}.`;
   } catch (error) { return ''; }
 }
-
-// === RULES BARU (KOMPREHENSIF) ===
-const SAFETY_RULES = `
-*** STRICT OUTPUT RULES ***
-1. FORMAT: Valid JSON only.
-2. SCORING: Must be NUMBER (0-100). Never "Not visible".
-3. SEO KEYWORDS: Generate 5 HIGH-VALUE keywords based on site persona. Estimate Google Rank based on on-page SEO health.
-4. MARKETING: Compare strictly with a REAL WORLD COMPETITOR (e.g. if analyzing a shoe store, compare with Nike/Tokopedia).
-5. UI/UX: Must cite ACADEMIC SOURCES (e.g., Nielsen, Norman, Garrett) for every observation.
-`;
 
 export async function POST(request: NextRequest) {
   try {
@@ -53,62 +40,75 @@ export async function POST(request: NextRequest) {
 
     if (!messages || !Array.isArray(messages)) return NextResponse.json({ error: 'Messages required' }, { status: 400 });
 
-    console.log(`[AI] Processing Task: ${task}`);
+    console.log(`[AI] Processing Task: ${task} (Simulation Mode)`);
     const learningContext = await getKnowledgeBase(task || 'General');
     
     const lastMessage = messages[messages.length - 1];
     if (lastMessage && lastMessage.role === 'user') {
-      // PROMPT ENGINEERING TINGKAT LANJUT
+      
+      // === PROMPT BARU: EXPERT SIMULATION MODE ===
+      // Kita memaksa AI untuk "Mensimulasikan" data agar tidak kosong.
       const deepPrompt = `
         ${learningContext}
-        ${SAFETY_RULES}
+        
+        *** INSTRUKSI UTAMA: SIMULASI AUDIT PROFESIONAL ***
+        Anda adalah Konsultan Digital Senior. Pengguna membutuhkan laporan yang LENGKAP dan PENUH.
+        
+        ATURAN PENGISIAN DATA (WAJIB):
+        1. JANGAN PERNAH MENGEMBALIKAN ARRAY KOSONG [].
+        2. UNTUK SEO: Simulasikan 5 keyword yang PALING RELEVAN untuk website jenis ini. Estimasi volume & ranking berdasarkan kualitas konten yang terlihat.
+        3. UNTUK MARKETING: WAJIB membandingkan dengan kompetitor nyata (Contoh: Tokopedia, Shopee, atau website pemerintah sejenis). JANGAN kosongkan bagian kompetitor.
+        4. UNTUK UI/UX: Wajib mengutip 1-2 teori (Nielsen/Norman).
+        5. FORMAT: JSON valid saja.
 
-        Lakukan analisis mendalam dengan struktur JSON berikut:
+        Isi struktur JSON ini sepenuhnya (jangan ada field yang null/kosong):
         {
-          "domain": "example.com",
+          "domain": "extract from url",
           "seo": {
             "overallSEO": {"score": 0-100, "visibility": "High/Med/Low"},
-            "technical_audit": {"score": 0-100, "core_web_vitals_assessment": "string", "mobile_friendliness": "string", "ssl_security": "string"},
+            "technical_audit": {"score": 0-100, "core_web_vitals_assessment": "Simulated (e.g. LCP 2.5s)", "mobile_friendliness": "Analysis based on image", "ssl_security": "Check url scheme"},
             "keyword_analysis": {
               "generated_keywords": [
-                {"keyword": "keyword 1", "search_volume": "High/Med", "google_rank_est": 1-100, "difficulty": "Hard/Easy", "intent": "Transactional/Info"}
+                {"keyword": "isi keyword relevan 1", "search_volume": "High/Med", "google_rank_est": 1-100, "intent": "Informational/Transactional"},
+                {"keyword": "isi keyword relevan 2", "search_volume": "High/Med", "google_rank_est": 1-100, "intent": "Informational/Transactional"},
+                {"keyword": "isi keyword relevan 3", "search_volume": "High/Med", "google_rank_est": 1-100, "intent": "Informational/Transactional"},
+                {"keyword": "isi keyword relevan 4", "search_volume": "High/Med", "google_rank_est": 1-100, "intent": "Informational/Transactional"},
+                {"keyword": "isi keyword relevan 5", "search_volume": "High/Med", "google_rank_est": 1-100, "intent": "Informational/Transactional"}
               ],
-              "ranking_analysis": "Analisis korelasi antara keyword umum vs spesifik terhadap kualitas website sebagai alat pemasaran."
+              "ranking_analysis": "Analisis simulasi potensi ranking."
             }
           },
           "ui_ux": {
             "ui": {
               "overall": 0-100,
-              "design_style": "Jelaskan gaya desain (misal: Minimalist, Brutalist, Material Design)",
-              "structure_audit": {"hero_section": "Exist/Missing", "navigation": "Standard/Non-standard", "cta_placement": "Clear/Hidden"}
+              "design_style": "e.g. Modern Minimalist / Corporate / Cluttered",
+              "structure_audit": {"hero_section": "Present/Missing", "navigation": "Clear/Confusing"}
             },
             "ux": {
               "overall": 0-100,
               "academic_analysis": [
-                {"theory": "Nama Teori (misal: Fitts Law / Jakob's Law)", "source": "Nama Peneliti/Buku", "observation": "Penerapan di website ini"}
+                {"theory": "Jakob's Law", "source": "NNGroup", "observation": "Users expect your site to work like other sites..."},
+                {"theory": "Aesthetic-Usability Effect", "source": "Nielsen", "observation": "Attractive design perceived as more usable..."}
               ]
             }
           },
           "marketing": {
             "overall": 1.0-5.0,
             "competitor_analysis": {
-              "competitor_name": "Sebutkan 1 kompetitor terkenal",
+              "competitor_name": "NAME_OF_REAL_COMPETITOR",
               "comparison_7p": {
-                "product": {"us": "...", "competitor": "...", "verdict": "Better/Worse"},
-                "price": {"us": "...", "competitor": "...", "verdict": "Better/Worse"},
-                "place": {"us": "...", "competitor": "...", "verdict": "Better/Worse"},
-                "promotion": {"us": "...", "competitor": "...", "verdict": "Better/Worse"},
-                "people": {"us": "...", "competitor": "...", "verdict": "Better/Worse"},
-                "process": {"us": "...", "competitor": "...", "verdict": "Better/Worse"},
-                "physical": {"us": "...", "competitor": "...", "verdict": "Better/Worse"}
+                "product": {"us": "Analysis", "competitor": "Comparison", "verdict": "Better/Worse/Equal"},
+                "price": {"us": "Analysis", "competitor": "Comparison", "verdict": "Better/Worse/Equal"},
+                "promotion": {"us": "Analysis", "competitor": "Comparison", "verdict": "Better/Worse/Equal"},
+                "place": {"us": "Analysis", "competitor": "Comparison", "verdict": "Better/Worse/Equal"}
               }
             }
           },
           "webqual": {
-            "usability": {"score": 0-5, "pct": 0-100, "deep_reasoning": "Penjelasan mendalam kenapa nilai ini didapat berdasarkan data UI/UX"},
-            "information": {"score": 0-5, "pct": 0-100, "deep_reasoning": "Penjelasan mendalam berdasarkan data SEO/Konten"},
-            "service": {"score": 0-5, "pct": 0-100, "deep_reasoning": "Penjelasan mendalam berdasarkan data Marketing/Trust"},
-            "overall": {"score": 0-5, "pct": 0-100, "calc": "string", "interpretation": "string"}
+            "usability": {"score": 0-5, "pct": 0-100, "deep_reasoning": "Reasoning..."},
+            "information": {"score": 0-5, "pct": 0-100, "deep_reasoning": "Reasoning..."},
+            "service": {"score": 0-5, "pct": 0-100, "deep_reasoning": "Reasoning..."},
+            "overall": {"score": 0-5, "pct": 0-100, "calc": "formula", "interpretation": "Excellent/Good/Fair"}
           }
         }
       `;
@@ -116,15 +116,22 @@ export async function POST(request: NextRequest) {
       if (typeof lastMessage.content === 'string') {
         lastMessage.content = deepPrompt + "\n" + lastMessage.content;
       } else if (Array.isArray(lastMessage.content)) {
-        lastMessage.content.unshift({ type: 'text', text: deepPrompt });
+        // Cari text block, kalau ga ada bikin baru di awal
+        const textIdx = lastMessage.content.findIndex((c: any) => c.type === 'text');
+        if (textIdx >= 0) {
+          lastMessage.content[textIdx].text = deepPrompt + "\n" + lastMessage.content[textIdx].text;
+        } else {
+          lastMessage.content.unshift({ type: 'text', text: deepPrompt });
+        }
       }
     }
 
+    // Call AI with slightly higher temperature for creativity in simulation
     const response = await anthropic.messages.create({
-      model: 'claude-sonnet-4-20250514', 
-      max_tokens: 4000, // Token diperbesar untuk analisis panjang
+      model: 'claude-sonnet-4-20250514', // Sesuai CSV Anda
+      max_tokens: 4000,
       messages: messages,
-      temperature: 0.2,
+      temperature: 0.4, // Naikkan dikit biar dia "berani" mengisi data simulasi
     });
 
     const textContent = response.content
@@ -132,6 +139,7 @@ export async function POST(request: NextRequest) {
       .map(block => block.text)
       .join('\n');
 
+    // JSON Cleaning
     let cleanJson = textContent;
     const jsonMatch = textContent.match(/\{[\s\S]*\}/);
     if (jsonMatch) cleanJson = jsonMatch[0];
