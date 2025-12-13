@@ -17,11 +17,9 @@ import HistorySidebar from './wmsi/HistorySidebar';
 const cleanScore = (val: any): number => {
   if (typeof val === 'number') return val;
   if (typeof val === 'string') {
-    // Coba parsing angka (misal "85" -> 85)
     const parsed = parseFloat(val);
     if (!isNaN(parsed)) return parsed;
   }
-  // Jika "Not visible", null, atau error -> return 0
   return 0;
 };
 
@@ -53,12 +51,9 @@ export default function WMSI() {
   const [health, setHealth] = useState({ supabase: false, cloudinary: false, claude: false });
 
   const stages = [
-    { id: 'init', name: 'Inisialisasi', w: 5 }, 
-    { id: 'seo', name: 'Deep SEO Audit', w: 25 }, 
-    { id: 'ui', name: 'UI/UX Heuristics', w: 30 }, 
-    { id: 'mkt', name: 'Marketing 7P Strategy', w: 25 }, 
-    { id: 'wq', name: 'WebQual 4.0 Synthesis', w: 10 }, 
-    { id: 'done', name: 'Finalisasi Laporan', w: 5 }
+    { id: 'init', name: 'Inisialisasi', w: 10 }, 
+    { id: 'analysis', name: 'Deep Analysis (AI Processing)', w: 80 }, 
+    { id: 'done', name: 'Finalisasi Laporan', w: 10 }
   ];
 
   // === EFFECTS ===
@@ -141,124 +136,232 @@ export default function WMSI() {
   };
 
   const loadFromHistory = (session: AnalysisSession) => {
+    // Reconstruct results dengan struktur yang benar
     setResults({
-      url: session.url, domain: session.domain, duration: session.duration_ms,
-      seo: { ...(session.seo_data as any), score: session.seo_score },
-      ui: { ...(session.uiux_data as any)?.ui, overall: session.ui_score },
-      ux: { ...(session.uiux_data as any)?.ux, overall: session.ux_score },
-      mkt: { ...(session.marketing_data as any), overall: session.marketing_score / 20 },
-      wq: session.webqual_data,
-      images: { desktop: "https://via.placeholder.com/800x600?text=History", mobile: "https://via.placeholder.com/400x800?text=History" }
+      url: session.url, 
+      domain: session.domain, 
+      duration: session.duration_ms,
+      seo: session.seo_data,
+      ui_ux: session.uiux_data,
+      marketing: session.marketing_data,
+      webqual: session.webqual_data,
+      images: { 
+        desktop: "https://via.placeholder.com/800x600?text=History", 
+        mobile: "https://via.placeholder.com/400x800?text=History" 
+      }
     });
-    setUrl(session.url); setShowHistory(false); setSavedToDb(true);
+    setUrl(session.url); 
+    setShowHistory(false); 
+    setSavedToDb(true);
   };
 
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>, type: 'desktop' | 'mobile') => {
-    const file = e.target.files?.[0]; if (!file) return;
+    const file = e.target.files?.[0]; 
+    if (!file) return;
+    
     const setter = type === 'desktop' ? setDesktopImg : setMobileImg;
+    
     try {
       setter({ preview: URL.createObjectURL(file), cloudinaryUrl: null, uploading: true });
+      
       const reader = new FileReader();
       reader.onload = async (ev) => {
         const img = new window.Image();
         img.onload = async () => {
            const cvs = document.createElement('canvas');
-           let w = img.width, h = img.height; const maxDim = 1200;
-           if (w > maxDim || h > maxDim) { const ratio = Math.min(maxDim / w, maxDim / h); w = Math.round(w * ratio); h = Math.round(h * ratio); }
-           cvs.width = w; cvs.height = h;
+           let w = img.width, h = img.height; 
+           const maxDim = 1200;
+           
+           if (w > maxDim || h > maxDim) { 
+             const ratio = Math.min(maxDim / w, maxDim / h); 
+             w = Math.round(w * ratio); 
+             h = Math.round(h * ratio); 
+           }
+           
+           cvs.width = w; 
+           cvs.height = h;
            const ctx = cvs.getContext('2d');
+           
            if(ctx) {
              ctx.drawImage(img, 0, 0, w, h);
              const base64 = cvs.toDataURL('image/jpeg', 0.8).split(',')[1];
-             const res = await fetch('/api/upload', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ image: base64, type }) });
+             
+             const res = await fetch('/api/upload', { 
+               method: 'POST', 
+               headers: { 'Content-Type': 'application/json' }, 
+               body: JSON.stringify({ image: base64, type }) 
+             });
+             
              if(!res.ok) throw new Error('Upload failed');
              const data = await res.json();
+             
              setter(prev => prev ? { ...prev, cloudinaryUrl: data.url, uploading: false } : null);
            }
-        }; img.src = ev.target?.result as string;
-      }; reader.readAsDataURL(file);
-    } catch (e: any) { setter(null); alert(`Upload gagal: ${e.message}`); }
+        }; 
+        img.src = ev.target?.result as string;
+      }; 
+      reader.readAsDataURL(file);
+    } catch (e: any) { 
+      setter(null); 
+      alert(`Upload gagal: ${e.message}`); 
+    }
   };
 
-  const callAPI = async (messages: any[], task: string) => {
-    const start = Date.now(); log('info', `${task}: Memproses data dengan Claude AI...`);
-    const res = await fetch('/api/analyze', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ messages, task }) });
-    if (!res.ok) throw new Error(`API Error ${res.status}`);
-    const data = await res.json(); log('success', `${task} selesai.`); return data.content;
+  const setStg = (id: string) => { 
+    const i = stages.findIndex(s => s.id === id); 
+    setProgress(stages.slice(0, i + 1).reduce((a, s) => a + s.w, 0)); 
+    setStage(id); 
   };
 
-  const parseJSON = (text: string) => { try { const m = text?.match(/\{[\s\S]*\}/); return m ? JSON.parse(m[0]) : null; } catch { return null; } };
-  const setStg = (id: string) => { const i = stages.findIndex(s => s.id === id); setProgress(stages.slice(0, i + 1).reduce((a, s) => a + s.w, 0)); setStage(id); };
-
-  // === CORE ANALYSIS (DENGAN SANITASI DATA) ===
+  // === CORE ANALYSIS (MENGGUNAKAN ENHANCED ROUTE.TS) ===
   const analyze = async () => {
     if (!url || !desktopImg?.cloudinaryUrl || !mobileImg?.cloudinaryUrl) return;
-    setAnalyzing(true); setError(null); setResults(null); setLogs([]); setProgress(0); setSavedToDb(false);
+    
+    setAnalyzing(true); 
+    setError(null); 
+    setResults(null); 
+    setLogs([]); 
+    setProgress(0); 
+    setSavedToDb(false);
+    
     const startTime = Date.now();
 
     try {
-      const nUrl = url.startsWith('http') ? url : 'https://' + url; const domain = new URL(nUrl).hostname;
-      setStg('init'); log('info', `Memulai analisis: ${domain}`);
-
-      // 1. SEO
-      setStg('seo');
-      const seoPrompt = `Bertindak sebagai Senior SEO Specialist. Audit SEO teknis & konten untuk ${nUrl}. Output JSON: {"domain":"${domain}","technical_audit":{"score":75,"core_web_vitals_assessment":"LCP 2.5s","mobile_friendliness":"Responsive","ssl_security":"Valid HTTPS","issues":["Slow LCP"]},"content_semantic_analysis":{"score":80,"keyword_strategy":"Good coverage","keywords":[{"keyword":"k1","volume":"High"}]},"overallSEO":{"score":78,"visibility":"High"},"strategic_recommendations":["Fix LCP"]}`;
-      let seoData = { overallSEO: { score: 65, visibility: 'Medium' } };
-      try { const c = await callAPI([{ role: 'user', content: seoPrompt }], 'SEO Deep Audit'); seoData = parseJSON(c) || seoData; } catch (e: any) { log('error', `SEO Error: ${e.message}`); }
-
-      // 2. UI/UX
-      setStg('ui');
-      let uiScore=70, uxScore=70, uiuxData={};
-      try {
-        const vC = [{ type: 'text', text: 'Analisis UI/UX expert. Output JSON.' }, { type: 'image', source: { type: 'url', url: desktopImg.cloudinaryUrl } }, { type: 'image', source: { type: 'url', url: mobileImg.cloudinaryUrl } }, { type: 'text', text: `Return JSON: {"ui":{"overall":75,"visual_hierarchy":{"score":8,"analysis":"Good"},"color_system":{"score":7,"analysis":"Safe"},"typography":{"score":8,"analysis":"Readable"}},"ux":{"overall":72,"usability_heuristics":{"visibility_of_status":{"score":7,"observation":"OK"}},"accessibility_wcag":"AA Compliant"},"key_strengths":["Clean layout"],"critical_improvements":["Contrast ratio"]}` }];
-        const c = await callAPI([{ role: 'user', content: vC }], 'UI/UX Vision'); uiuxData = parseJSON(c) || {};
-        // SANITASI SCORE: Gunakan cleanScore()
-        if ((uiuxData as any)?.ui?.overall) uiScore = cleanScore((uiuxData as any).ui.overall);
-        if ((uiuxData as any)?.ux?.overall) uxScore = cleanScore((uiuxData as any).ux.overall);
-      } catch (e: any) { log('warning', `Vision Error: ${e.message}`); }
-
-      // 3. Marketing
-      setStg('mkt');
-      let mktData = { overall: 3.0 };
-      try { const c = await callAPI([{ role: 'user', content: `CMO Analysis for ${nUrl}. Context: SEO=${(seoData as any).overallSEO?.score}, UX=${uxScore}. Output JSON: {"marketing_mix_7p":{"product":"Value","price":"Price","place":"Dist","promotion":"Promo","people":"Tone","process":"Flow","physical_evidence":"Trust"},"brand_authority":{"trust_score":80,"brand_archetype":"Sage","analysis":"Trusted"},"overall":3.5,"maturity_stage":"Growth"}` }], 'Marketing Strategy'); mktData = parseJSON(c) || mktData; } catch (e: any) { log('error', `Marketing Error: ${e.message}`); }
-
-      // 4. WebQual (Kalkulasi dengan Clean Scores)
-      setStg('wq');
-      // Pastikan semua input kalkulasi adalah ANGKA
-      const cleanSeoScore = cleanScore((seoData as any).overallSEO?.score) || 60;
-      const cleanMktScore = cleanScore((mktData as any).overall) || 3;
+      const nUrl = url.startsWith('http') ? url : 'https://' + url; 
+      const domain = new URL(nUrl).hostname;
       
-      const wqU = ((uiScore+uxScore)/2)/20; 
-      const wqI = cleanSeoScore/20; 
-      const wqS = (cleanMktScore + (uxScore/20))/2;
-      const wqT = (wqU*0.33)+(wqI*0.33)+(wqS*0.34); 
-      const wqP = (wqT/5)*100;
+      setStg('init'); 
+      log('info', `Memulai analisis: ${domain}`);
+      
+      await new Promise(r => setTimeout(r, 500)); // Simulate init
 
-      const wqD = { usability:{score:wqU, pct:(wqU/5)*100}, information:{score:wqI, pct:(wqI/5)*100}, service:{score:wqS, pct:(wqS/5)*100}, overall:{score:wqT, pct:wqP, calc:`(U=${wqU.toFixed(1)}*0.33) + (I=${wqI.toFixed(1)}*0.33) + (S=${wqS.toFixed(1)}*0.34)`, interpretation:wqP>70?"Excellent":"Good"} };
+      // === CALL ENHANCED API (Yang sudah ada Data Enforcer) ===
+      setStg('analysis');
+      log('info', 'Mengirim data ke AI Intelligence System...');
+      
+      const analysisPrompt = [
+        { 
+          type: 'text', 
+          text: `Analisis website ${nUrl} secara komprehensif. Berikan output dalam format JSON lengkap dengan semua field yang diminta.` 
+        },
+        { 
+          type: 'image', 
+          source: { type: 'url', url: desktopImg.cloudinaryUrl } 
+        },
+        { 
+          type: 'image', 
+          source: { type: 'url', url: mobileImg.cloudinaryUrl } 
+        }
+      ];
+
+      const apiResponse = await fetch('/api/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          messages: [{ role: 'user', content: analysisPrompt }],
+          task: 'Complete Website Analysis'
+        })
+      });
+
+      if (!apiResponse.ok) {
+        throw new Error(`API Error ${apiResponse.status}`);
+      }
+
+      const apiData = await apiResponse.json();
+      log('success', 'AI analysis complete!');
+
+      // Parse hasil dari API
+      let parsedResults;
+      try {
+        parsedResults = JSON.parse(apiData.content);
+      } catch (e) {
+        throw new Error('Failed to parse API response');
+      }
+
+      // Log enforcement status
+      if (apiData.enforced) {
+        log('warning', `Data enforcer activated: ${apiData.validation.missingFields?.join(', ')}`);
+      } else {
+        log('success', 'All data fields complete from AI');
+      }
 
       setStg('done');
-      const finalResults = { url: nUrl, domain, duration: Date.now()-startTime, seo: seoData, ui: (uiuxData as any).ui, ux: (uiuxData as any).ux, vision_analysis: uiuxData, mkt: mktData, wq: wqD, images: { desktop: desktopImg.cloudinaryUrl, mobile: mobileImg.cloudinaryUrl } };
-      setResults(finalResults);
+      
+      // === STRUKTUR DATA YANG BENAR (SESUAI ANALYSISRESULTS.TSX) ===
+      const finalResults = {
+        url: nUrl,
+        domain: parsedResults.domain || domain,
+        duration: Date.now() - startTime,
+        
+        // Key yang benar sesuai AnalysisResults.tsx
+        seo: parsedResults.seo || {},
+        ui_ux: parsedResults.ui_ux || {},  // ✅ ui_ux bukan ui/ux terpisah
+        marketing: parsedResults.marketing || {},
+        webqual: parsedResults.webqual || {},  // ✅ webqual bukan wq
+        
+        images: {
+          desktop: desktopImg.cloudinaryUrl,
+          mobile: mobileImg.cloudinaryUrl
+        }
+      };
 
-      // Save DB (Dengan data yang sudah bersih)
+      setResults(finalResults);
+      log('success', 'Report generated successfully!');
+
+      // === SAVE TO DATABASE ===
       try {
-        const s: AnalysisSession = { 
-          url: nUrl, domain, 
-          seo_score: cleanSeoScore, 
-          ui_score: uiScore, 
-          ux_score: uxScore, 
-          marketing_score: cleanMktScore * 20, 
-          webqual_score: wqP, 
-          duration_ms: Date.now()-startTime, desktop_count: 1, mobile_count: 1, 
-          seo_data: seoData, uiux_data: uiuxData, marketing_data: mktData, webqual_data: wqD, 
-          user_id: user?user.id:null 
+        // Extract scores dengan safe cleaning
+        const seoScore = cleanScore(parsedResults.seo?.overallSEO?.score || parsedResults.seo?.technical_audit?.score);
+        const uiScore = cleanScore(parsedResults.ui_ux?.ui?.overall);
+        const uxScore = cleanScore(parsedResults.ui_ux?.ux?.overall);
+        const mktScore = cleanScore(parsedResults.marketing?.overall) * 20;
+        const wqScore = cleanScore(parsedResults.webqual?.overall?.pct);
+
+        const sessionData: AnalysisSession = {
+          url: nUrl,
+          domain: parsedResults.domain || domain,
+          seo_score: seoScore,
+          ui_score: uiScore,
+          ux_score: uxScore,
+          marketing_score: mktScore,
+          webqual_score: wqScore,
+          duration_ms: Date.now() - startTime,
+          desktop_count: 1,
+          mobile_count: 1,
+          seo_data: parsedResults.seo || {},
+          uiux_data: parsedResults.ui_ux || {},
+          marketing_data: parsedResults.marketing || {},
+          webqual_data: parsedResults.webqual || {},
+          user_id: user ? user.id : null
         };
-        await saveAnalysisSession(s); setSavedToDb(true); if (user) fetchHistory(user.id);
-      } catch (e: any) { log('error', `DB Save Error: ${e.message}`); }
-    } catch (err: any) { setError(err.message); } finally { setAnalyzing(false); }
+
+        await saveAnalysisSession(sessionData);
+        setSavedToDb(true);
+        log('success', 'Saved to database');
+        
+        if (user) fetchHistory(user.id);
+      } catch (dbError: any) {
+        log('error', `Database save failed: ${dbError.message}`);
+        // Don't throw - analysis still succeeded
+      }
+
+    } catch (err: any) {
+      log('error', err.message);
+      setError(err.message);
+    } finally {
+      setAnalyzing(false);
+    }
   };
 
-  const reset = () => { setResults(null); setDesktopImg(null); setMobileImg(null); setUrl(''); setLogs([]); setTab('overview'); setError(null); };
+  const reset = () => { 
+    setResults(null); 
+    setDesktopImg(null); 
+    setMobileImg(null); 
+    setUrl(''); 
+    setLogs([]); 
+    setTab('overview'); 
+    setError(null); 
+  };
 
   // === RENDER ===
   return (
