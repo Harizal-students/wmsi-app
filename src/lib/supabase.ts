@@ -25,6 +25,7 @@ export interface AnalysisSession {
   webqual_data: object;
   user_agent?: string;
   ip_address?: string;
+  user_id?: string | null; // NEW: Added user_id
 }
 
 // Save analysis session to database
@@ -43,16 +44,16 @@ export async function saveAnalysisSession(session: AnalysisSession) {
   return data;
 }
 
-// Get all analysis sessions
-export async function getAnalysisSessions(limit = 100) {
+// Get analysis sessions by User ID (History)
+export async function getUserHistory(userId: string) {
   const { data, error } = await supabase
     .from('analysis_sessions')
     .select('*')
-    .order('created_at', { ascending: false })
-    .limit(limit);
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false });
 
   if (error) {
-    console.error('Error fetching sessions:', error);
+    console.error('Error fetching history:', error);
     throw error;
   }
 
@@ -69,22 +70,6 @@ export async function getAnalysisSessionById(id: string) {
 
   if (error) {
     console.error('Error fetching session:', error);
-    throw error;
-  }
-
-  return data;
-}
-
-// Get analysis sessions by domain
-export async function getAnalysisSessionsByDomain(domain: string) {
-  const { data, error } = await supabase
-    .from('analysis_sessions')
-    .select('*')
-    .eq('domain', domain)
-    .order('created_at', { ascending: false });
-
-  if (error) {
-    console.error('Error fetching sessions by domain:', error);
     throw error;
   }
 
