@@ -1,15 +1,24 @@
 'use client';
 
-import React, { useState, useCallback, useRef } from 'react';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { 
   Globe, Search, XCircle, FileText, Palette, 
   RefreshCw, Award, MousePointer, 
   Megaphone, LayoutGrid, Beaker, Brain, Camera, Monitor, 
-  Smartphone, Shield, Database, AlertCircle, Upload, Cloud, CheckCircle
+  Smartphone, Shield, Database, AlertCircle, Upload, Cloud, CheckCircle,
+  Activity, Server, Image as ImageIcon // Icon tambahan untuk health check
 } from 'lucide-react';
 import { saveAnalysisSession, AnalysisSession } from '@/lib/supabase';
 
+// Tipe data untuk status health check
+type SystemHealth = {
+  supabase: boolean;
+  cloudinary: boolean;
+  claude: boolean;
+};
+
 export default function WMSI() {
+  // === STATE UTAMA ===
   const [url, setUrl] = useState('');
   const [analyzing, setAnalyzing] = useState(false);
   const [stage, setStage] = useState<string | null>(null);
@@ -20,12 +29,58 @@ export default function WMSI() {
   const [tab, setTab] = useState('overview');
   const [savedToDb, setSavedToDb] = useState(false);
 
-  // Image states with Cloudinary URLs
+  // === STATE GAMBAR (Cloudinary) ===
   const [desktopImg, setDesktopImg] = useState<{preview: string; cloudinaryUrl: string | null; uploading: boolean} | null>(null);
   const [mobileImg, setMobileImg] = useState<{preview: string; cloudinaryUrl: string | null; uploading: boolean} | null>(null);
   const desktopRef = useRef<HTMLInputElement>(null);
   const mobileRef = useRef<HTMLInputElement>(null);
 
+  // === STATE HEALTH CHECK ===
+  const [bootStatus, setBootStatus] = useState<'checking' | 'ready' | 'error'>('checking');
+  const [health, setHealth] = useState<SystemHealth>({ supabase: false, cloudinary: false, claude: false });
+
+  // === EFFECT: JALANKAN CHECK SAAT LOAD ===
+  useEffect(() => {
+    checkSystemHealth();
+  }, []);
+
+  // === LOGIC HEALTH CHECK ===
+  const checkSystemHealth = async () => {
+    setBootStatus('checking');
+    setError(null);
+    setHealth({ supabase: false, cloudinary: false, claude: false });
+    
+    try {
+      // Delay visual agar user melihat proses checking
+      await new Promise(r => setTimeout(r, 800)); 
+      
+      const res = await fetch('/api/health');
+      if (!res.ok) throw new Error('Health API error');
+
+      const data = await res.json();
+      
+      if (data.checks) {
+        // Simulasi sequential check agar terlihat step-by-step
+        setTimeout(() => setHealth(prev => ({ ...prev, supabase: data.checks.supabase })), 200);
+        setTimeout(() => setHealth(prev => ({ ...prev, claude: data.checks.claude })), 600);
+        setTimeout(() => setHealth(prev => ({ ...prev, cloudinary: data.checks.cloudinary })), 1000);
+        
+        setTimeout(() => {
+          if (data.status === 'ok') {
+            setBootStatus('ready');
+          } else {
+            setBootStatus('error');
+            setError('Salah satu layanan sistem tidak merespons. Pastikan API Keys valid.');
+          }
+        }, 1500);
+      }
+    } catch (err) {
+      setBootStatus('error');
+      setError('Gagal menghubungi server kesehatan sistem. Pastikan route /api/health ada.');
+    }
+  };
+
+  // === LOGIC EXISTING (LOGGING, UTILS) ===
   const log = useCallback((type: string, msg: string) => {
     setLogs(prev => [...prev, { ts: new Date().toLocaleTimeString('id-ID'), type, msg }]);
   }, []);
@@ -52,7 +107,7 @@ export default function WMSI() {
     } catch { return null; }
   };
 
-  // Compress image before uploading to Cloudinary
+  // === LOGIC UPLOAD GAMBAR ===
   const compressForUpload = (file: File): Promise<string> => {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
@@ -90,7 +145,6 @@ export default function WMSI() {
     });
   };
 
-  // Upload to Cloudinary
   const uploadToCloudinary = async (base64: string, type: 'desktop' | 'mobile'): Promise<string> => {
     const res = await fetch('/api/upload', {
       method: 'POST',
@@ -157,6 +211,7 @@ export default function WMSI() {
     if (mobileRef.current) mobileRef.current.value = '';
   };
 
+  // === STAGES ANALISIS ===
   const stages = [
     { id: 'init', name: 'Init', w: 5 },
     { id: 'seo', name: 'SEO', w: 25 },
@@ -172,6 +227,7 @@ export default function WMSI() {
     setStage(id);
   };
 
+  // === CALL API CLAUDE ===
   const callAPI = async (messages: any[], task: string) => {
     const start = Date.now();
     log('info', `${task}: calling Claude API...`);
@@ -192,6 +248,7 @@ export default function WMSI() {
     return data.content;
   };
 
+  // === CORE ANALYSIS FUNCTION ===
   const analyze = async () => {
     if (!url || !desktopImg?.cloudinaryUrl || !mobileImg?.cloudinaryUrl) return;
 
@@ -361,6 +418,7 @@ export default function WMSI() {
     setError(null);
   };
 
+  // === VISUAL HELPERS ===
   const Bar = ({ v, c, h = 6 }: { v: number; c?: string; h?: number }) => (
     <div style={{ width: '100%', height: h, background: '#e5e7eb', borderRadius: h, overflow: 'hidden' }}>
       <div style={{ width: `${Math.min(v, 100)}%`, height: '100%', background: c || clr(v), borderRadius: h, transition: 'width 0.5s' }} />
@@ -379,9 +437,23 @@ export default function WMSI() {
     );
   };
 
+  const CheckRow = ({ label, done, icon: Icon }: { label: string, done: boolean, icon: any }) => (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px', background: '#f8fafc', borderRadius: 8, marginBottom: 8 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        <Icon size={18} style={{ color: done ? '#16a34a' : '#94a3b8' }} />
+        <span style={{ fontSize: 14, fontWeight: 500, color: done ? '#0f172a' : '#64748b' }}>{label}</span>
+      </div>
+      {done ? 
+        <CheckCircle size={18} style={{ color: '#16a34a' }} className="animate-in zoom-in" /> : 
+        <div style={{ width: 16, height: 16, borderRadius: '50%', border: '2px solid #cbd5e1', borderTopColor: '#3b82f6' }} className="animate-spin" />
+      }
+    </div>
+  );
+
   const canAnalyze = url && desktopImg?.cloudinaryUrl && mobileImg?.cloudinaryUrl;
   const isUploading = desktopImg?.uploading || mobileImg?.uploading;
 
+  // === MAIN RENDER ===
   return (
     <div style={{ minHeight: '100vh', background: 'linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%)', fontFamily: 'system-ui' }}>
       <div style={{ maxWidth: 900, margin: '0 auto', padding: 20 }}>
@@ -396,334 +468,374 @@ export default function WMSI() {
           <p style={{ color: '#64748b', fontSize: 13 }}>SEO, UI/UX, Marketing Analysis with Cloud Image Hosting</p>
         </header>
 
-        {/* Input Form */}
-        {!analyzing && !results && (
-          <div style={{ background: '#fff', borderRadius: 16, padding: 24, boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)' }}>
-
-            {/* Info */}
-            <div style={{ background: '#eff6ff', borderRadius: 8, padding: 12, marginBottom: 20, border: '1px solid #bfdbfe', display: 'flex', gap: 10 }}>
-              <Cloud size={18} style={{ color: '#2563eb', flexShrink: 0 }} />
-              <div style={{ fontSize: 12, color: '#1e40af' }}>
-                <strong>Cloudinary Mode:</strong> Images uploaded to cloud, then analyzed via URL. No more 413 errors!
-              </div>
+        {/* === SCREEN 1: SYSTEM HEALTH CHECK === */}
+        {bootStatus !== 'ready' && (
+          <div style={{ background: '#fff', borderRadius: 16, padding: 32, boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)', maxWidth: 500, margin: '40px auto' }}>
+            <div style={{ textAlign: 'center', marginBottom: 24 }}>
+              <Activity size={48} style={{ color: bootStatus === 'checking' ? '#3b82f6' : '#ef4444', margin: '0 auto 16px' }} className={bootStatus === 'checking' ? "animate-pulse" : ""} />
+              <h2 style={{ fontSize: 20, fontWeight: 700, marginBottom: 8 }}>
+                {bootStatus === 'checking' ? 'System Health Check' : 'Connection Error'}
+              </h2>
+              <p style={{ color: '#64748b', fontSize: 14 }}>
+                {bootStatus === 'checking' ? 'Memeriksa koneksi ke layanan cloud...' : error || 'Gagal terhubung ke layanan.'}
+              </p>
             </div>
 
-            {/* URL */}
-            <div style={{ marginBottom: 20 }}>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 600, marginBottom: 8, fontSize: 14 }}>
-                <Globe size={18} style={{ color: '#0ea5e9' }} /> URL Website
-              </label>
-              <input
-                type="url"
-                value={url}
-                onChange={(e) => setUrl(e.target.value)}
-                placeholder="https://example.com"
-                style={{ width: '100%', padding: 12, fontSize: 14, border: '2px solid #e2e8f0', borderRadius: 8, outline: 'none' }}
-              />
+            <div style={{ marginBottom: 24 }}>
+              <CheckRow label="Supabase Database" done={health.supabase} icon={Database} />
+              <CheckRow label="Claude AI Engine" done={health.claude} icon={Brain} />
+              <CheckRow label="Cloudinary Storage" done={health.cloudinary} icon={ImageIcon} />
             </div>
 
-            {/* Screenshots */}
-            <div style={{ marginBottom: 20 }}>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 600, marginBottom: 12, fontSize: 14 }}>
-                <Camera size={18} style={{ color: '#8b5cf6' }} /> Screenshots (Auto-Upload to Cloudinary)
-              </label>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                {/* Desktop */}
-                <div style={{ background: '#f8fafc', padding: 12, borderRadius: 10, border: desktopImg?.cloudinaryUrl ? '2px solid #10b981' : '2px solid #3b82f6' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
-                    <Monitor size={16} style={{ color: '#3b82f6' }} />
-                    <span style={{ fontWeight: 600, fontSize: 13 }}>Desktop</span>
-                    {desktopImg?.uploading && (
-                      <span style={{ marginLeft: 'auto', fontSize: 11, color: '#f59e0b', display: 'flex', alignItems: 'center', gap: 4 }}>
-                        <Upload size={12} className="animate-pulse" /> Uploading...
-                      </span>
-                    )}
-                    {desktopImg?.cloudinaryUrl && (
-                      <span style={{ marginLeft: 'auto', fontSize: 11, color: '#10b981', display: 'flex', alignItems: 'center', gap: 4 }}>
-                        <CheckCircle size={12} /> Uploaded
-                      </span>
-                    )}
-                  </div>
-                  {!desktopImg ? (
-                    <div onClick={() => desktopRef.current?.click()} style={{ border: '2px dashed #93c5fd', borderRadius: 6, padding: 16, textAlign: 'center', cursor: 'pointer', background: '#eff6ff' }}>
-                      <input type="file" ref={desktopRef} onChange={handleDesktop} accept="image/*" style={{ display: 'none' }} />
-                      <Upload size={24} style={{ color: '#3b82f6' }} />
-                      <p style={{ margin: '4px 0 0', fontSize: 12, color: '#1e40af' }}>Click to upload</p>
-                    </div>
-                  ) : (
-                    <div style={{ position: 'relative' }}>
-                      <img src={desktopImg.preview} alt="" style={{ width: '100%', height: 80, objectFit: 'cover', borderRadius: 6, opacity: desktopImg.uploading ? 0.5 : 1 }} />
-                      <button onClick={() => setDesktopImg(null)} style={{ position: 'absolute', top: 4, right: 4, width: 20, height: 20, borderRadius: 50, background: '#ef4444', border: 'none', cursor: 'pointer', color: '#fff', fontSize: 12 }}>×</button>
-                    </div>
-                  )}
-                </div>
-
-                {/* Mobile */}
-                <div style={{ background: '#f8fafc', padding: 12, borderRadius: 10, border: mobileImg?.cloudinaryUrl ? '2px solid #10b981' : '2px solid #8b5cf6' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
-                    <Smartphone size={16} style={{ color: '#8b5cf6' }} />
-                    <span style={{ fontWeight: 600, fontSize: 13 }}>Mobile</span>
-                    {mobileImg?.uploading && (
-                      <span style={{ marginLeft: 'auto', fontSize: 11, color: '#f59e0b', display: 'flex', alignItems: 'center', gap: 4 }}>
-                        <Upload size={12} /> Uploading...
-                      </span>
-                    )}
-                    {mobileImg?.cloudinaryUrl && (
-                      <span style={{ marginLeft: 'auto', fontSize: 11, color: '#10b981', display: 'flex', alignItems: 'center', gap: 4 }}>
-                        <CheckCircle size={12} /> Uploaded
-                      </span>
-                    )}
-                  </div>
-                  {!mobileImg ? (
-                    <div onClick={() => mobileRef.current?.click()} style={{ border: '2px dashed #c4b5fd', borderRadius: 6, padding: 16, textAlign: 'center', cursor: 'pointer', background: '#f5f3ff' }}>
-                      <input type="file" ref={mobileRef} onChange={handleMobile} accept="image/*" style={{ display: 'none' }} />
-                      <Upload size={24} style={{ color: '#8b5cf6' }} />
-                      <p style={{ margin: '4px 0 0', fontSize: 12, color: '#5b21b6' }}>Click to upload</p>
-                    </div>
-                  ) : (
-                    <div style={{ position: 'relative' }}>
-                      <img src={mobileImg.preview} alt="" style={{ width: '100%', height: 80, objectFit: 'cover', borderRadius: 6, opacity: mobileImg.uploading ? 0.5 : 1 }} />
-                      <button onClick={() => setMobileImg(null)} style={{ position: 'absolute', top: 4, right: 4, width: 20, height: 20, borderRadius: 50, background: '#ef4444', border: 'none', cursor: 'pointer', color: '#fff', fontSize: 12 }}>×</button>
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            {/* Status */}
-            <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
-              <div style={{ flex: 1, padding: 8, background: desktopImg?.cloudinaryUrl ? '#dcfce7' : '#fef3c7', borderRadius: 6, textAlign: 'center', fontSize: 12 }}>
-                {desktopImg?.cloudinaryUrl ? '✓ Desktop ready' : desktopImg?.uploading ? '⏳ Uploading...' : '⚠ Need Desktop'}
-              </div>
-              <div style={{ flex: 1, padding: 8, background: mobileImg?.cloudinaryUrl ? '#dcfce7' : '#fef3c7', borderRadius: 6, textAlign: 'center', fontSize: 12 }}>
-                {mobileImg?.cloudinaryUrl ? '✓ Mobile ready' : mobileImg?.uploading ? '⏳ Uploading...' : '⚠ Need Mobile'}
-              </div>
-            </div>
-
-            {/* Button */}
-            <button
-              onClick={analyze}
-              disabled={!canAnalyze || isUploading}
-              style={{
-                width: '100%', padding: 14, fontSize: 15, fontWeight: 700, borderRadius: 10, border: 'none',
-                cursor: (canAnalyze && !isUploading) ? 'pointer' : 'not-allowed',
-                background: (canAnalyze && !isUploading) ? 'linear-gradient(135deg, #0ea5e9, #0284c7)' : '#e2e8f0',
-                color: (canAnalyze && !isUploading) ? '#fff' : '#94a3b8',
-                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8
-              }}
-            >
-              <Brain size={18} /> 
-              {isUploading ? 'Waiting for upload...' : !canAnalyze ? 'Complete all fields' : 'Start Analysis'}
-            </button>
+            {bootStatus === 'error' && (
+               <button onClick={checkSystemHealth} style={{ width: '100%', padding: 12, background: '#ef4444', color: '#fff', border: 'none', borderRadius: 8, cursor: 'pointer', fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+                 <RefreshCw size={16} /> Retry Connection
+               </button>
+            )}
           </div>
         )}
 
-        {/* Analyzing */}
-        {analyzing && (
-          <div style={{ background: '#fff', borderRadius: 16, padding: 24 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 20 }}>
-              <div style={{ position: 'relative' }}>
-                <Ring v={progress} />
-                <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, fontWeight: 700, color: '#0ea5e9' }}>{progress}%</div>
-              </div>
-              <div>
-                <h3 style={{ fontWeight: 700, fontSize: 16, margin: 0 }}>{stage ? stages.find(s => s.id === stage)?.name : 'Processing...'}</h3>
-                <p style={{ color: '#64748b', fontSize: 12, margin: '4px 0 0' }}>Using Cloudinary URLs</p>
-              </div>
-            </div>
+        {/* === SCREEN 2: MAIN APP (Hanya muncul jika sistem ready) === */}
+        {bootStatus === 'ready' && (
+          <>
+            {/* Input Form */}
+            {!analyzing && !results && (
+              <div className="animate-in fade-in slide-in-from-bottom-4 duration-500" style={{ background: '#fff', borderRadius: 16, padding: 24, boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)' }}>
 
-            <div style={{ display: 'flex', gap: 4, marginBottom: 16 }}>
-              {stages.map((s, i) => {
-                const idx = stages.findIndex(st => st.id === stage);
-                return <div key={s.id} style={{ flex: s.w, height: 4, borderRadius: 2, background: i < idx ? '#10b981' : i === idx ? '#0ea5e9' : '#e5e7eb' }} />;
-              })}
-            </div>
-
-            <div style={{ maxHeight: 250, overflow: 'auto', background: '#0f172a', borderRadius: 8, padding: 12 }}>
-              {logs.map((l, i) => (
-                <div key={i} style={{ fontSize: 11, fontFamily: 'monospace', color: l.type === 'error' ? '#f87171' : l.type === 'success' ? '#4ade80' : l.type === 'warning' ? '#fbbf24' : '#94a3b8', marginBottom: 4 }}>
-                  <span style={{ color: '#475569', marginRight: 8 }}>{l.ts}</span>{l.msg}
+                {/* Info Ready */}
+                <div style={{ background: '#f0fdf4', borderRadius: 8, padding: 12, marginBottom: 20, border: '1px solid #bbf7d0', display: 'flex', gap: 10, alignItems: 'center' }}>
+                   <CheckCircle size={18} style={{ color: '#16a34a', flexShrink: 0 }} />
+                   <div style={{ fontSize: 12, color: '#166534' }}>
+                     <strong>System Ready:</strong> Semua koneksi (Supabase, Claude, Cloudinary) terhubung.
+                   </div>
                 </div>
-              ))}
-            </div>
-          </div>
-        )}
 
-        {/* Results */}
-        {results && (
-          <div>
-            {savedToDb && (
-              <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 10, padding: 10, marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
-                <Database size={16} style={{ color: '#16a34a' }} />
-                <span style={{ fontSize: 12, color: '#166534' }}>Saved to Supabase</span>
+                {/* Cloudinary Info */}
+                <div style={{ background: '#eff6ff', borderRadius: 8, padding: 12, marginBottom: 20, border: '1px solid #bfdbfe', display: 'flex', gap: 10 }}>
+                  <Cloud size={18} style={{ color: '#2563eb', flexShrink: 0 }} />
+                  <div style={{ fontSize: 12, color: '#1e40af' }}>
+                    <strong>Cloudinary Mode:</strong> Images uploaded to cloud, then analyzed via URL. No more 413 errors!
+                  </div>
+                </div>
+
+                {/* URL */}
+                <div style={{ marginBottom: 20 }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 600, marginBottom: 8, fontSize: 14 }}>
+                    <Globe size={18} style={{ color: '#0ea5e9' }} /> URL Website
+                  </label>
+                  <input
+                    type="url"
+                    value={url}
+                    onChange={(e) => setUrl(e.target.value)}
+                    placeholder="https://example.com"
+                    style={{ width: '100%', padding: 12, fontSize: 14, border: '2px solid #e2e8f0', borderRadius: 8, outline: 'none' }}
+                  />
+                </div>
+
+                {/* Screenshots */}
+                <div style={{ marginBottom: 20 }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 600, marginBottom: 12, fontSize: 14 }}>
+                    <Camera size={18} style={{ color: '#8b5cf6' }} /> Screenshots (Auto-Upload to Cloudinary)
+                  </label>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                    {/* Desktop */}
+                    <div style={{ background: '#f8fafc', padding: 12, borderRadius: 10, border: desktopImg?.cloudinaryUrl ? '2px solid #10b981' : '2px solid #3b82f6' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+                        <Monitor size={16} style={{ color: '#3b82f6' }} />
+                        <span style={{ fontWeight: 600, fontSize: 13 }}>Desktop</span>
+                        {desktopImg?.uploading && (
+                          <span style={{ marginLeft: 'auto', fontSize: 11, color: '#f59e0b', display: 'flex', alignItems: 'center', gap: 4 }}>
+                            <Upload size={12} className="animate-pulse" /> Uploading...
+                          </span>
+                        )}
+                        {desktopImg?.cloudinaryUrl && (
+                          <span style={{ marginLeft: 'auto', fontSize: 11, color: '#10b981', display: 'flex', alignItems: 'center', gap: 4 }}>
+                            <CheckCircle size={12} /> Uploaded
+                          </span>
+                        )}
+                      </div>
+                      {!desktopImg ? (
+                        <div onClick={() => desktopRef.current?.click()} style={{ border: '2px dashed #93c5fd', borderRadius: 6, padding: 16, textAlign: 'center', cursor: 'pointer', background: '#eff6ff' }}>
+                          <input type="file" ref={desktopRef} onChange={handleDesktop} accept="image/*" style={{ display: 'none' }} />
+                          <Upload size={24} style={{ color: '#3b82f6' }} />
+                          <p style={{ margin: '4px 0 0', fontSize: 12, color: '#1e40af' }}>Click to upload</p>
+                        </div>
+                      ) : (
+                        <div style={{ position: 'relative' }}>
+                          <img src={desktopImg.preview} alt="" style={{ width: '100%', height: 80, objectFit: 'cover', borderRadius: 6, opacity: desktopImg.uploading ? 0.5 : 1 }} />
+                          <button onClick={() => setDesktopImg(null)} style={{ position: 'absolute', top: 4, right: 4, width: 20, height: 20, borderRadius: 50, background: '#ef4444', border: 'none', cursor: 'pointer', color: '#fff', fontSize: 12 }}>×</button>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Mobile */}
+                    <div style={{ background: '#f8fafc', padding: 12, borderRadius: 10, border: mobileImg?.cloudinaryUrl ? '2px solid #10b981' : '2px solid #8b5cf6' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+                        <Smartphone size={16} style={{ color: '#8b5cf6' }} />
+                        <span style={{ fontWeight: 600, fontSize: 13 }}>Mobile</span>
+                        {mobileImg?.uploading && (
+                          <span style={{ marginLeft: 'auto', fontSize: 11, color: '#f59e0b', display: 'flex', alignItems: 'center', gap: 4 }}>
+                            <Upload size={12} /> Uploading...
+                          </span>
+                        )}
+                        {mobileImg?.cloudinaryUrl && (
+                          <span style={{ marginLeft: 'auto', fontSize: 11, color: '#10b981', display: 'flex', alignItems: 'center', gap: 4 }}>
+                            <CheckCircle size={12} /> Uploaded
+                          </span>
+                        )}
+                      </div>
+                      {!mobileImg ? (
+                        <div onClick={() => mobileRef.current?.click()} style={{ border: '2px dashed #c4b5fd', borderRadius: 6, padding: 16, textAlign: 'center', cursor: 'pointer', background: '#f5f3ff' }}>
+                          <input type="file" ref={mobileRef} onChange={handleMobile} accept="image/*" style={{ display: 'none' }} />
+                          <Upload size={24} style={{ color: '#8b5cf6' }} />
+                          <p style={{ margin: '4px 0 0', fontSize: 12, color: '#5b21b6' }}>Click to upload</p>
+                        </div>
+                      ) : (
+                        <div style={{ position: 'relative' }}>
+                          <img src={mobileImg.preview} alt="" style={{ width: '100%', height: 80, objectFit: 'cover', borderRadius: 6, opacity: mobileImg.uploading ? 0.5 : 1 }} />
+                          <button onClick={() => setMobileImg(null)} style={{ position: 'absolute', top: 4, right: 4, width: 20, height: 20, borderRadius: 50, background: '#ef4444', border: 'none', cursor: 'pointer', color: '#fff', fontSize: 12 }}>×</button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Status */}
+                <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+                  <div style={{ flex: 1, padding: 8, background: desktopImg?.cloudinaryUrl ? '#dcfce7' : '#fef3c7', borderRadius: 6, textAlign: 'center', fontSize: 12 }}>
+                    {desktopImg?.cloudinaryUrl ? '✓ Desktop ready' : desktopImg?.uploading ? '⏳ Uploading...' : '⚠ Need Desktop'}
+                  </div>
+                  <div style={{ flex: 1, padding: 8, background: mobileImg?.cloudinaryUrl ? '#dcfce7' : '#fef3c7', borderRadius: 6, textAlign: 'center', fontSize: 12 }}>
+                    {mobileImg?.cloudinaryUrl ? '✓ Mobile ready' : mobileImg?.uploading ? '⏳ Uploading...' : '⚠ Need Mobile'}
+                  </div>
+                </div>
+
+                {/* Button */}
+                <button
+                  onClick={analyze}
+                  disabled={!canAnalyze || isUploading}
+                  style={{
+                    width: '100%', padding: 14, fontSize: 15, fontWeight: 700, borderRadius: 10, border: 'none',
+                    cursor: (canAnalyze && !isUploading) ? 'pointer' : 'not-allowed',
+                    background: (canAnalyze && !isUploading) ? 'linear-gradient(135deg, #0ea5e9, #0284c7)' : '#e2e8f0',
+                    color: (canAnalyze && !isUploading) ? '#fff' : '#94a3b8',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8
+                  }}
+                >
+                  <Brain size={18} /> 
+                  {isUploading ? 'Waiting for upload...' : !canAnalyze ? 'Complete all fields' : 'Start Analysis'}
+                </button>
               </div>
             )}
 
-            {/* Score Summary */}
-            <div style={{ background: 'linear-gradient(135deg, #0ea5e9, #0284c7)', borderRadius: 14, padding: 20, color: '#fff', marginBottom: 16 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 16 }}>
-                <div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                    <Award size={18} />
-                    <h2 style={{ fontSize: 18, fontWeight: 800, margin: 0 }}>WebQual 4.0</h2>
+            {/* Analyzing */}
+            {analyzing && (
+              <div style={{ background: '#fff', borderRadius: 16, padding: 24 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 20 }}>
+                  <div style={{ position: 'relative' }}>
+                    <Ring v={progress} />
+                    <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, fontWeight: 700, color: '#0ea5e9' }}>{progress}%</div>
                   </div>
-                  <p style={{ opacity: 0.9, fontSize: 13, margin: 0 }}>{results.url}</p>
-                  <p style={{ opacity: 0.7, fontSize: 11, margin: '4px 0 0' }}>{(results.duration/1000).toFixed(1)}s | Cloudinary</p>
+                  <div>
+                    <h3 style={{ fontWeight: 700, fontSize: 16, margin: 0 }}>{stage ? stages.find(s => s.id === stage)?.name : 'Processing...'}</h3>
+                    <p style={{ color: '#64748b', fontSize: 12, margin: '4px 0 0' }}>Using Cloudinary URLs</p>
+                  </div>
                 </div>
-                <div style={{ textAlign: 'center' }}>
-                  <div style={{ fontSize: 44, fontWeight: 800 }}>{results.wq.overall.pct.toFixed(0)}%</div>
-                  <div style={{ fontSize: 13, opacity: 0.9 }}>{lbl(results.wq.overall.pct)}</div>
+
+                <div style={{ display: 'flex', gap: 4, marginBottom: 16 }}>
+                  {stages.map((s, i) => {
+                    const idx = stages.findIndex(st => st.id === stage);
+                    return <div key={s.id} style={{ flex: s.w, height: 4, borderRadius: 2, background: i < idx ? '#10b981' : i === idx ? '#0ea5e9' : '#e5e7eb' }} />;
+                  })}
+                </div>
+
+                <div style={{ maxHeight: 250, overflow: 'auto', background: '#0f172a', borderRadius: 8, padding: 12 }}>
+                  {logs.map((l, i) => (
+                    <div key={i} style={{ fontSize: 11, fontFamily: 'monospace', color: l.type === 'error' ? '#f87171' : l.type === 'success' ? '#4ade80' : l.type === 'warning' ? '#fbbf24' : '#94a3b8', marginBottom: 4 }}>
+                      <span style={{ color: '#475569', marginRight: 8 }}>{l.ts}</span>{l.msg}
+                    </div>
+                  ))}
                 </div>
               </div>
+            )}
 
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10, marginTop: 16 }}>
-                {[
-                  { k: 'usability', l: 'Usability', icon: MousePointer },
-                  { k: 'information', l: 'Info', icon: FileText },
-                  { k: 'service', l: 'Service', icon: Shield },
-                  { k: 'marketing', l: 'Marketing', icon: Megaphone }
-                ].map(d => {
-                  const Icon = d.icon;
-                  return (
-                    <div key={d.k} style={{ background: 'rgba(255,255,255,0.15)', borderRadius: 8, padding: 10, textAlign: 'center' }}>
-                      <Icon size={14} style={{ opacity: 0.9 }} />
-                      <div style={{ fontSize: 18, fontWeight: 700, marginTop: 4 }}>{results.wq[d.k].pct.toFixed(0)}%</div>
-                      <div style={{ fontSize: 10, opacity: 0.8 }}>{d.l}</div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* Tabs */}
-            <div style={{ display: 'flex', gap: 6, marginBottom: 12 }}>
-              {['overview', 'seo', 'ui', 'mkt', 'wq'].map(t => (
-                <button key={t} onClick={() => setTab(t)} style={{
-                  padding: '8px 14px', fontSize: 12, fontWeight: 600, border: 'none', borderRadius: 6, cursor: 'pointer',
-                  background: tab === t ? '#0ea5e9' : '#fff', color: tab === t ? '#fff' : '#64748b'
-                }}>
-                  {t === 'overview' ? 'Overview' : t === 'seo' ? 'SEO' : t === 'ui' ? 'UI/UX' : t === 'mkt' ? 'Marketing' : 'WebQual'}
-                </button>
-              ))}
-            </div>
-
-            {/* Tab Content */}
-            <div style={{ background: '#fff', borderRadius: 14, padding: 20, minHeight: 200 }}>
-              {tab === 'overview' && (
-                <div>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10, marginBottom: 16 }}>
-                    <div style={{ background: '#f8fafc', borderRadius: 10, padding: 14, borderLeft: '4px solid #10b981' }}>
-                      <div style={{ fontSize: 12, color: '#64748b' }}>SEO</div>
-                      <div style={{ fontSize: 24, fontWeight: 700, color: '#10b981' }}>{results.seo.score}</div>
-                      <Bar v={results.seo.score} c="#10b981" h={4} />
-                    </div>
-                    <div style={{ background: '#f8fafc', borderRadius: 10, padding: 14, borderLeft: '4px solid #3b82f6' }}>
-                      <div style={{ fontSize: 12, color: '#64748b' }}>UI</div>
-                      <div style={{ fontSize: 24, fontWeight: 700, color: '#3b82f6' }}>{results.ui.overall}</div>
-                      <Bar v={results.ui.overall} c="#3b82f6" h={4} />
-                    </div>
-                    <div style={{ background: '#f8fafc', borderRadius: 10, padding: 14, borderLeft: '4px solid #f59e0b' }}>
-                      <div style={{ fontSize: 12, color: '#64748b' }}>UX</div>
-                      <div style={{ fontSize: 24, fontWeight: 700, color: '#f59e0b' }}>{results.ux.overall}</div>
-                      <Bar v={results.ux.overall} c="#f59e0b" h={4} />
-                    </div>
+            {/* Results */}
+            {results && (
+              <div>
+                {savedToDb && (
+                  <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 10, padding: 10, marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <Database size={16} style={{ color: '#16a34a' }} />
+                    <span style={{ fontSize: 12, color: '#166534' }}>Saved to Supabase</span>
                   </div>
-                  
-                  {/* Screenshots from Cloudinary */}
-                  <div style={{ background: '#f8fafc', borderRadius: 10, padding: 12 }}>
-                    <h4 style={{ fontSize: 13, marginBottom: 8, color: '#64748b' }}>Analyzed Screenshots</h4>
-                    <div style={{ display: 'flex', gap: 12 }}>
-                      <div>
-                        <div style={{ fontSize: 11, color: '#3b82f6', marginBottom: 4 }}>Desktop</div>
-                        <img src={results.images.desktop} alt="Desktop" style={{ width: 150, height: 100, objectFit: 'cover', borderRadius: 6, border: '2px solid #93c5fd' }} />
+                )}
+
+                {/* Score Summary */}
+                <div style={{ background: 'linear-gradient(135deg, #0ea5e9, #0284c7)', borderRadius: 14, padding: 20, color: '#fff', marginBottom: 16 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 16 }}>
+                    <div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                        <Award size={18} />
+                        <h2 style={{ fontSize: 18, fontWeight: 800, margin: 0 }}>WebQual 4.0</h2>
                       </div>
-                      <div>
-                        <div style={{ fontSize: 11, color: '#8b5cf6', marginBottom: 4 }}>Mobile</div>
-                        <img src={results.images.mobile} alt="Mobile" style={{ width: 60, height: 100, objectFit: 'cover', borderRadius: 6, border: '2px solid #c4b5fd' }} />
-                      </div>
+                      <p style={{ opacity: 0.9, fontSize: 13, margin: 0 }}>{results.url}</p>
+                      <p style={{ opacity: 0.7, fontSize: 11, margin: '4px 0 0' }}>{(results.duration/1000).toFixed(1)}s | Cloudinary</p>
+                    </div>
+                    <div style={{ textAlign: 'center' }}>
+                      <div style={{ fontSize: 44, fontWeight: 800 }}>{results.wq.overall.pct.toFixed(0)}%</div>
+                      <div style={{ fontSize: 13, opacity: 0.9 }}>{lbl(results.wq.overall.pct)}</div>
                     </div>
                   </div>
-                </div>
-              )}
 
-              {tab === 'seo' && (
-                <div>
-                  <div style={{ background: 'linear-gradient(135deg, #10b981, #059669)', borderRadius: 10, padding: 16, color: '#fff', marginBottom: 16 }}>
-                    <div style={{ fontSize: 11, opacity: 0.8 }}>SEO Score</div>
-                    <div style={{ fontSize: 32, fontWeight: 800 }}>{results.seo.score}/100</div>
-                  </div>
-                  {results.seo.keywords && (
-                    <div style={{ background: '#f8fafc', borderRadius: 8, padding: 12 }}>
-                      <h4 style={{ fontSize: 13, marginBottom: 8 }}>Keywords</h4>
-                      {results.seo.keywords.slice(0, 5).map((k: any, i: number) => (
-                        <div key={i} style={{ padding: 6, borderBottom: '1px solid #e5e7eb', fontSize: 12 }}>
-                          {k.keyword} - Rank #{k.rank || k.estimatedRank}
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10, marginTop: 16 }}>
+                    {[
+                      { k: 'usability', l: 'Usability', icon: MousePointer },
+                      { k: 'information', l: 'Info', icon: FileText },
+                      { k: 'service', l: 'Service', icon: Shield },
+                      { k: 'marketing', l: 'Marketing', icon: Megaphone }
+                    ].map(d => {
+                      const Icon = d.icon;
+                      return (
+                        <div key={d.k} style={{ background: 'rgba(255,255,255,0.15)', borderRadius: 8, padding: 10, textAlign: 'center' }}>
+                          <Icon size={14} style={{ opacity: 0.9 }} />
+                          <div style={{ fontSize: 18, fontWeight: 700, marginTop: 4 }}>{results.wq[d.k].pct.toFixed(0)}%</div>
+                          <div style={{ fontSize: 10, opacity: 0.8 }}>{d.l}</div>
                         </div>
-                      ))}
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Tabs */}
+                <div style={{ display: 'flex', gap: 6, marginBottom: 12 }}>
+                  {['overview', 'seo', 'ui', 'mkt', 'wq'].map(t => (
+                    <button key={t} onClick={() => setTab(t)} style={{
+                      padding: '8px 14px', fontSize: 12, fontWeight: 600, border: 'none', borderRadius: 6, cursor: 'pointer',
+                      background: tab === t ? '#0ea5e9' : '#fff', color: tab === t ? '#fff' : '#64748b'
+                    }}>
+                      {t === 'overview' ? 'Overview' : t === 'seo' ? 'SEO' : t === 'ui' ? 'UI/UX' : t === 'mkt' ? 'Marketing' : 'WebQual'}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Tab Content */}
+                <div style={{ background: '#fff', borderRadius: 14, padding: 20, minHeight: 200 }}>
+                  {tab === 'overview' && (
+                    <div>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10, marginBottom: 16 }}>
+                        <div style={{ background: '#f8fafc', borderRadius: 10, padding: 14, borderLeft: '4px solid #10b981' }}>
+                          <div style={{ fontSize: 12, color: '#64748b' }}>SEO</div>
+                          <div style={{ fontSize: 24, fontWeight: 700, color: '#10b981' }}>{results.seo.score}</div>
+                          <Bar v={results.seo.score} c="#10b981" h={4} />
+                        </div>
+                        <div style={{ background: '#f8fafc', borderRadius: 10, padding: 14, borderLeft: '4px solid #3b82f6' }}>
+                          <div style={{ fontSize: 12, color: '#64748b' }}>UI</div>
+                          <div style={{ fontSize: 24, fontWeight: 700, color: '#3b82f6' }}>{results.ui.overall}</div>
+                          <Bar v={results.ui.overall} c="#3b82f6" h={4} />
+                        </div>
+                        <div style={{ background: '#f8fafc', borderRadius: 10, padding: 14, borderLeft: '4px solid #f59e0b' }}>
+                          <div style={{ fontSize: 12, color: '#64748b' }}>UX</div>
+                          <div style={{ fontSize: 24, fontWeight: 700, color: '#f59e0b' }}>{results.ux.overall}</div>
+                          <Bar v={results.ux.overall} c="#f59e0b" h={4} />
+                        </div>
+                      </div>
+                      
+                      {/* Screenshots from Cloudinary */}
+                      <div style={{ background: '#f8fafc', borderRadius: 10, padding: 12 }}>
+                        <h4 style={{ fontSize: 13, marginBottom: 8, color: '#64748b' }}>Analyzed Screenshots</h4>
+                        <div style={{ display: 'flex', gap: 12 }}>
+                          <div>
+                            <div style={{ fontSize: 11, color: '#3b82f6', marginBottom: 4 }}>Desktop</div>
+                            <img src={results.images.desktop} alt="Desktop" style={{ width: 150, height: 100, objectFit: 'cover', borderRadius: 6, border: '2px solid #93c5fd' }} />
+                          </div>
+                          <div>
+                            <div style={{ fontSize: 11, color: '#8b5cf6', marginBottom: 4 }}>Mobile</div>
+                            <img src={results.images.mobile} alt="Mobile" style={{ width: 60, height: 100, objectFit: 'cover', borderRadius: 6, border: '2px solid #c4b5fd' }} />
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {tab === 'seo' && (
+                    <div>
+                      <div style={{ background: 'linear-gradient(135deg, #10b981, #059669)', borderRadius: 10, padding: 16, color: '#fff', marginBottom: 16 }}>
+                        <div style={{ fontSize: 11, opacity: 0.8 }}>SEO Score</div>
+                        <div style={{ fontSize: 32, fontWeight: 800 }}>{results.seo.score}/100</div>
+                      </div>
+                      {results.seo.keywords && (
+                        <div style={{ background: '#f8fafc', borderRadius: 8, padding: 12 }}>
+                          <h4 style={{ fontSize: 13, marginBottom: 8 }}>Keywords</h4>
+                          {results.seo.keywords.slice(0, 5).map((k: any, i: number) => (
+                            <div key={i} style={{ padding: 6, borderBottom: '1px solid #e5e7eb', fontSize: 12 }}>
+                              {k.keyword} - Rank #{k.rank || k.estimatedRank}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {tab === 'ui' && (
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                      <div style={{ background: '#eff6ff', borderRadius: 10, padding: 16, textAlign: 'center' }}>
+                        <div style={{ fontSize: 12, color: '#1e40af' }}>UI Score</div>
+                        <div style={{ fontSize: 32, fontWeight: 700, color: '#3b82f6' }}>{results.ui.overall}</div>
+                      </div>
+                      <div style={{ background: '#fffbeb', borderRadius: 10, padding: 16, textAlign: 'center' }}>
+                        <div style={{ fontSize: 12, color: '#92400e' }}>UX Score</div>
+                        <div style={{ fontSize: 32, fontWeight: 700, color: '#f59e0b' }}>{results.ux.overall}</div>
+                      </div>
+                    </div>
+                  )}
+
+                  {tab === 'mkt' && (
+                    <div>
+                      <div style={{ background: 'linear-gradient(135deg, #ec4899, #db2777)', borderRadius: 10, padding: 16, color: '#fff' }}>
+                        <div style={{ fontSize: 11, opacity: 0.8 }}>Marketing</div>
+                        <div style={{ fontSize: 32, fontWeight: 800 }}>{((results.mkt.overall || 3) * 20).toFixed(0)}%</div>
+                        <div style={{ fontSize: 12, marginTop: 4 }}>{results.mkt.maturity || 'Developing'}</div>
+                      </div>
+                    </div>
+                  )}
+
+                  {tab === 'wq' && (
+                    <div>
+                      <div style={{ background: '#f0f9ff', borderRadius: 8, padding: 12, marginBottom: 16 }}>
+                        <h4 style={{ color: '#0369a1', fontSize: 13 }}>WebQual 4.0 Formula</h4>
+                        <code style={{ fontSize: 10 }}>{results.wq.overall.calc}</code>
+                      </div>
+                      <div style={{ background: 'linear-gradient(135deg, #0ea5e9, #0284c7)', borderRadius: 10, padding: 20, color: '#fff', textAlign: 'center' }}>
+                        <div style={{ fontSize: 12, opacity: 0.9 }}>Final Score</div>
+                        <div style={{ fontSize: 48, fontWeight: 800 }}>{results.wq.overall.pct.toFixed(1)}%</div>
+                        <div style={{ fontSize: 14 }}>{lbl(results.wq.overall.pct)}</div>
+                      </div>
                     </div>
                   )}
                 </div>
-              )}
 
-              {tab === 'ui' && (
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                  <div style={{ background: '#eff6ff', borderRadius: 10, padding: 16, textAlign: 'center' }}>
-                    <div style={{ fontSize: 12, color: '#1e40af' }}>UI Score</div>
-                    <div style={{ fontSize: 32, fontWeight: 700, color: '#3b82f6' }}>{results.ui.overall}</div>
-                  </div>
-                  <div style={{ background: '#fffbeb', borderRadius: 10, padding: 16, textAlign: 'center' }}>
-                    <div style={{ fontSize: 12, color: '#92400e' }}>UX Score</div>
-                    <div style={{ fontSize: 32, fontWeight: 700, color: '#f59e0b' }}>{results.ux.overall}</div>
-                  </div>
-                </div>
-              )}
-
-              {tab === 'mkt' && (
-                <div>
-                  <div style={{ background: 'linear-gradient(135deg, #ec4899, #db2777)', borderRadius: 10, padding: 16, color: '#fff' }}>
-                    <div style={{ fontSize: 11, opacity: 0.8 }}>Marketing</div>
-                    <div style={{ fontSize: 32, fontWeight: 800 }}>{((results.mkt.overall || 3) * 20).toFixed(0)}%</div>
-                    <div style={{ fontSize: 12, marginTop: 4 }}>{results.mkt.maturity || 'Developing'}</div>
-                  </div>
-                </div>
-              )}
-
-              {tab === 'wq' && (
-                <div>
-                  <div style={{ background: '#f0f9ff', borderRadius: 8, padding: 12, marginBottom: 16 }}>
-                    <h4 style={{ color: '#0369a1', fontSize: 13 }}>WebQual 4.0 Formula</h4>
-                    <code style={{ fontSize: 10 }}>{results.wq.overall.calc}</code>
-                  </div>
-                  <div style={{ background: 'linear-gradient(135deg, #0ea5e9, #0284c7)', borderRadius: 10, padding: 20, color: '#fff', textAlign: 'center' }}>
-                    <div style={{ fontSize: 12, opacity: 0.9 }}>Final Score</div>
-                    <div style={{ fontSize: 48, fontWeight: 800 }}>{results.wq.overall.pct.toFixed(1)}%</div>
-                    <div style={{ fontSize: 14 }}>{lbl(results.wq.overall.pct)}</div>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            <button onClick={reset} style={{ width: '100%', marginTop: 16, padding: 12, fontSize: 13, fontWeight: 600, background: '#f1f5f9', border: 'none', borderRadius: 8, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
-              <RefreshCw size={14} /> New Analysis
-            </button>
-          </div>
-        )}
-
-        {/* Error */}
-        {error && (
-          <div style={{ background: '#fef2f2', borderRadius: 10, padding: 16, border: '1px solid #fecaca', marginTop: 16 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <XCircle size={20} style={{ color: '#ef4444' }} />
-              <div>
-                <h4 style={{ fontWeight: 700, color: '#991b1b', margin: 0, fontSize: 14 }}>Error</h4>
-                <p style={{ color: '#b91c1c', margin: '4px 0 0', fontSize: 12 }}>{error}</p>
+                <button onClick={reset} style={{ width: '100%', marginTop: 16, padding: 12, fontSize: 13, fontWeight: 600, background: '#f1f5f9', border: 'none', borderRadius: 8, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+                  <RefreshCw size={14} /> New Analysis
+                </button>
               </div>
-            </div>
-            <button onClick={() => { setError(null); setAnalyzing(false); }} style={{ marginTop: 10, padding: '6px 12px', fontSize: 12, background: '#fff', border: '1px solid #fecaca', borderRadius: 4, cursor: 'pointer', color: '#991b1b' }}>
-              Try Again
-            </button>
-          </div>
+            )}
+
+            {/* Error */}
+            {error && (
+              <div style={{ background: '#fef2f2', borderRadius: 10, padding: 16, border: '1px solid #fecaca', marginTop: 16 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <XCircle size={20} style={{ color: '#ef4444' }} />
+                  <div>
+                    <h4 style={{ fontWeight: 700, color: '#991b1b', margin: 0, fontSize: 14 }}>Error</h4>
+                    <p style={{ color: '#b91c1c', margin: '4px 0 0', fontSize: 12 }}>{error}</p>
+                  </div>
+                </div>
+                <button onClick={() => { setError(null); setAnalyzing(false); }} style={{ marginTop: 10, padding: '6px 12px', fontSize: 12, background: '#fff', border: '1px solid #fecaca', borderRadius: 4, cursor: 'pointer', color: '#991b1b' }}>
+                  Try Again
+                </button>
+              </div>
+            )}
+          </>
         )}
       </div>
     </div>
