@@ -1,5 +1,5 @@
 import React from 'react';
-import { Award, MousePointer, FileText, Shield, Megaphone, Database, RefreshCw } from 'lucide-react';
+import { Award, MousePointer, FileText, Shield, Megaphone, Database, RefreshCw, CheckCircle2, AlertTriangle, Info } from 'lucide-react';
 import { Bar, lbl } from './SharedUI';
 
 type Props = {
@@ -11,115 +11,279 @@ type Props = {
   userEmail: string | null;
 };
 
+// Sub-component untuk Card Analisis Teks
+const InfoCard = ({ title, children, color = '#3b82f6' }: { title: string, children: React.ReactNode, color?: string }) => (
+  <div style={{ background: '#fff', border: `1px solid ${color}30`, borderRadius: 12, padding: 16, marginBottom: 16 }}>
+    <h4 style={{ color: color, fontSize: 14, fontWeight: 700, marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
+      <Info size={16} /> {title}
+    </h4>
+    <div style={{ fontSize: 13, lineHeight: '1.6', color: '#334155' }}>
+      {children}
+    </div>
+  </div>
+);
+
+// Sub-component untuk List Item
+const ListItem = ({ label, value }: { label: string, value: string }) => (
+  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px dashed #e2e8f0', fontSize: 13 }}>
+    <span style={{ color: '#64748b' }}>{label}</span>
+    <span style={{ fontWeight: 600, color: '#0f172a', maxWidth: '60%', textAlign: 'right' }}>{value}</span>
+  </div>
+);
+
 export default function AnalysisResults({ results, tab, setTab, reset, savedToDb, userEmail }: Props) {
   if (!results) return null;
 
+  const wq = results.wq;
+  const seo = results.seo;
+  const vision = results.vision_analysis || {};
+  const mkt = results.mkt;
+
   return (
-    <div>
+    <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
+      
+      {/* Header Save Info */}
       {savedToDb && (
         <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 10, padding: 10, marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
           <Database size={16} style={{ color: '#16a34a' }} />
-          <span style={{ fontSize: 12, color: '#166534' }}>Saved to Supabase {userEmail ? `(Account: ${userEmail})` : '(Anonymous)'}</span>
+          <span style={{ fontSize: 12, color: '#166534' }}>Analisis tersimpan ke akun: <strong>{userEmail}</strong></span>
         </div>
       )}
 
-      {/* Score Header */}
-      <div style={{ background: 'linear-gradient(135deg, #0ea5e9, #0284c7)', borderRadius: 14, padding: 20, color: '#fff', marginBottom: 16 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 16 }}>
+      {/* WebQual Score Card (Hero Section) */}
+      <div style={{ background: 'linear-gradient(135deg, #0ea5e9, #0284c7)', borderRadius: 16, padding: 24, color: '#fff', marginBottom: 20, boxShadow: '0 10px 20px -5px rgba(14, 165, 233, 0.3)' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', flexWrap: 'wrap', gap: 16 }}>
           <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-              <Award size={18} />
-              <h2 style={{ fontSize: 18, fontWeight: 800, margin: 0 }}>WebQual 4.0</h2>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, background: 'rgba(255,255,255,0.2)', padding: '4px 12px', borderRadius: 20, width: 'fit-content' }}>
+              <Award size={14} />
+              <span style={{ fontSize: 12, fontWeight: 700 }}>WebQual 4.0 Score</span>
             </div>
-            <p style={{ opacity: 0.9, fontSize: 13, margin: 0 }}>{results.url}</p>
+            <h2 style={{ fontSize: 20, fontWeight: 800, margin: '0 0 4px 0' }}>{results.domain}</h2>
+            <p style={{ opacity: 0.9, fontSize: 13 }}>{results.url}</p>
           </div>
           <div style={{ textAlign: 'center' }}>
-            <div style={{ fontSize: 44, fontWeight: 800 }}>{results.wq.overall.pct.toFixed(0)}%</div>
-            <div style={{ fontSize: 13, opacity: 0.9 }}>{lbl(results.wq.overall.pct)}</div>
+            <div style={{ fontSize: 48, fontWeight: 800, lineHeight: 1 }}>{wq.overall.pct.toFixed(0)}<span style={{fontSize:24}}>%</span></div>
+            <div style={{ fontSize: 13, opacity: 0.9, marginTop: 4 }}>{wq.overall.interpretation}</div>
           </div>
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10, marginTop: 16 }}>
+
+        {/* 3 Dimensi WebQual */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginTop: 24 }}>
           {[
-            { k: 'usability', l: 'Usability', icon: MousePointer },
-            { k: 'information', l: 'Info', icon: FileText },
-            { k: 'service', l: 'Service', icon: Shield },
-            { k: 'marketing', l: 'Marketing', icon: Megaphone }
-          ].map(d => {
-            const Icon = d.icon;
-            return (
-              <div key={d.k} style={{ background: 'rgba(255,255,255,0.15)', borderRadius: 8, padding: 10, textAlign: 'center' }}>
-                <Icon size={14} style={{ opacity: 0.9 }} />
-                <div style={{ fontSize: 18, fontWeight: 700, marginTop: 4 }}>{results.wq[d.k].pct.toFixed(0)}%</div>
-                <div style={{ fontSize: 10, opacity: 0.8 }}>{d.l}</div>
+            { l: 'Usability', v: wq.usability.pct, i: MousePointer, d: 'Quality of Use' },
+            { l: 'Info Quality', v: wq.information.pct, i: FileText, d: 'Accuracy & Relevance' },
+            { l: 'Service', v: wq.service.pct, i: Shield, d: 'Trust & Interaction' }
+          ].map((item, idx) => (
+            <div key={idx} style={{ background: 'rgba(255,255,255,0.15)', borderRadius: 10, padding: 12, backdropFilter: 'blur(5px)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                <item.i size={14} style={{ opacity: 0.8 }} />
+                <span style={{ fontSize: 12, fontWeight: 600, opacity: 0.9 }}>{item.l}</span>
               </div>
-            );
-          })}
+              <div style={{ fontSize: 20, fontWeight: 700 }}>{item.v.toFixed(0)}%</div>
+              <div style={{ fontSize: 10, opacity: 0.7, marginTop: 2 }}>{item.d}</div>
+            </div>
+          ))}
         </div>
       </div>
 
-      {/* Tabs */}
-      <div style={{ display: 'flex', gap: 6, marginBottom: 12 }}>
-        {['overview', 'seo', 'ui', 'mkt', 'wq'].map(t => (
-          <button key={t} onClick={() => setTab(t)} style={{
-            padding: '8px 14px', fontSize: 12, fontWeight: 600, border: 'none', borderRadius: 6, cursor: 'pointer',
-            background: tab === t ? '#0ea5e9' : '#fff', color: tab === t ? '#fff' : '#64748b'
+      {/* Navigation Tabs */}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 16, overflowX: 'auto', paddingBottom: 4 }}>
+        {[
+          { id: 'overview', label: 'Overview' },
+          { id: 'seo', label: 'SEO Audit' },
+          { id: 'ui', label: 'UI/UX Vision' },
+          { id: 'mkt', label: 'Marketing 7P' },
+          { id: 'wq', label: 'WebQual Science' }
+        ].map(t => (
+          <button key={t.id} onClick={() => setTab(t.id)} style={{
+            padding: '8px 16px', fontSize: 13, fontWeight: 600, border: 'none', borderRadius: 20, cursor: 'pointer', flexShrink: 0,
+            background: tab === t.id ? '#0f172a' : '#fff', 
+            color: tab === t.id ? '#fff' : '#64748b',
+            boxShadow: tab === t.id ? '0 4px 12px rgba(15, 23, 42, 0.15)' : 'none',
+            transition: 'all 0.2s'
           }}>
-            {t === 'overview' ? 'Overview' : t === 'seo' ? 'SEO' : t === 'ui' ? 'UI/UX' : t === 'mkt' ? 'Marketing' : 'WebQual'}
+            {t.label}
           </button>
         ))}
       </div>
 
-      {/* Tab Content */}
-      <div style={{ background: '#fff', borderRadius: 14, padding: 20, minHeight: 200 }}>
+      {/* CONTENT AREA */}
+      <div style={{ background: '#fff', borderRadius: 16, padding: 24, boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)', minHeight: 300 }}>
+        
+        {/* === TAB: OVERVIEW === */}
         {tab === 'overview' && (
           <div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10, marginBottom: 16 }}>
-              <div style={{ background: '#f8fafc', borderRadius: 10, padding: 14, borderLeft: '4px solid #10b981' }}>
-                <div style={{ fontSize: 12, color: '#64748b' }}>SEO</div>
-                <div style={{ fontSize: 24, fontWeight: 700, color: '#10b981' }}>{results.seo.score}</div>
-                <Bar v={results.seo.score} c="#10b981" h={4} />
+            <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 16, color: '#0f172a' }}>Executive Summary</h3>
+            
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 24 }}>
+              <InfoCard title="Key Strengths" color="#10b981">
+                <ul style={{ paddingLeft: 16, margin: 0 }}>
+                  {vision.key_strengths?.map((s: string, i: number) => <li key={i} style={{ marginBottom: 4 }}>{s}</li>) || <li>Analisis mendalam sedang diproses...</li>}
+                </ul>
+              </InfoCard>
+              <InfoCard title="Critical Improvements" color="#ef4444">
+                <ul style={{ paddingLeft: 16, margin: 0 }}>
+                  {vision.critical_improvements?.map((s: string, i: number) => <li key={i} style={{ marginBottom: 4 }}>{s}</li>) || <li>Tidak ada isu kritikal mayor.</li>}
+                </ul>
+              </InfoCard>
+            </div>
+
+            <h4 style={{ fontSize: 14, fontWeight: 700, marginBottom: 12 }}>Performance Metrics</h4>
+            <div style={{ display: 'grid', gap: 12 }}>
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6, fontSize: 12 }}>
+                  <span>SEO Performance</span>
+                  <strong>{seo.overallSEO?.score}/100</strong>
+                </div>
+                <Bar v={seo.overallSEO?.score || 0} c="#10b981" />
               </div>
-              <div style={{ background: '#f8fafc', borderRadius: 10, padding: 14, borderLeft: '4px solid #3b82f6' }}>
-                <div style={{ fontSize: 12, color: '#64748b' }}>UI</div>
-                <div style={{ fontSize: 24, fontWeight: 700, color: '#3b82f6' }}>{results.ui.overall}</div>
-                <Bar v={results.ui.overall} c="#3b82f6" h={4} />
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6, fontSize: 12 }}>
+                  <span>UI/UX & Vision</span>
+                  <strong>{vision.ui?.overall}/100</strong>
+                </div>
+                <Bar v={vision.ui?.overall || 0} c="#3b82f6" />
               </div>
-              <div style={{ background: '#f8fafc', borderRadius: 10, padding: 14, borderLeft: '4px solid #f59e0b' }}>
-                <div style={{ fontSize: 12, color: '#64748b' }}>UX</div>
-                <div style={{ fontSize: 24, fontWeight: 700, color: '#f59e0b' }}>{results.ux.overall}</div>
-                <Bar v={results.ux.overall} c="#f59e0b" h={4} />
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6, fontSize: 12 }}>
+                  <span>Marketing Maturity</span>
+                  <strong>{((mkt.overall || 0) * 20).toFixed(0)}/100</strong>
+                </div>
+                <Bar v={(mkt.overall || 0) * 20} c="#8b5cf6" />
               </div>
             </div>
           </div>
         )}
+
+        {/* === TAB: SEO === */}
         {tab === 'seo' && (
           <div>
-            <h3 style={{marginBottom:10}}>SEO Analysis</h3>
-            <pre style={{fontSize:11, background:'#f8fafc', padding:10, borderRadius:8, overflow:'auto'}}>{JSON.stringify(results.seo, null, 2)}</pre>
+            <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
+              <CheckCircle2 size={18} color="#10b981" /> Technical & Content SEO
+            </h3>
+            
+            <div style={{ display: 'grid', gap: 16 }}>
+              <div style={{ background: '#f8fafc', padding: 16, borderRadius: 12 }}>
+                <h4 style={{ fontSize: 13, fontWeight: 700, marginBottom: 12, color: '#334155' }}>Technical Audit</h4>
+                {seo.technical_audit ? (
+                  <div style={{ display: 'grid', gap: 8 }}>
+                    <ListItem label="Core Web Vitals" value={seo.technical_audit.core_web_vitals_assessment} />
+                    <ListItem label="Mobile Friendly" value={seo.technical_audit.mobile_friendliness} />
+                    <ListItem label="SSL & Security" value={seo.technical_audit.ssl_security} />
+                  </div>
+                ) : <p style={{fontSize:12, color:'#64748b'}}>Data teknis tidak tersedia.</p>}
+              </div>
+
+              <div style={{ background: '#f8fafc', padding: 16, borderRadius: 12 }}>
+                <h4 style={{ fontSize: 13, fontWeight: 700, marginBottom: 12, color: '#334155' }}>Content & Keywords Strategy</h4>
+                <p style={{ fontSize: 13, color: '#475569', marginBottom: 12 }}>{seo.content_semantic_analysis?.keyword_strategy}</p>
+                
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                  {seo.content_semantic_analysis?.keywords?.map((k: any, i: number) => (
+                    <span key={i} style={{ background: '#e0f2fe', color: '#0284c7', padding: '4px 10px', borderRadius: 20, fontSize: 11, fontWeight: 600 }}>
+                      {k.keyword}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            </div>
           </div>
         )}
+
+        {/* === TAB: UI/UX === */}
         {tab === 'ui' && (
           <div>
-            <h3 style={{marginBottom:10}}>UI/UX Vision Analysis</h3>
-            <pre style={{fontSize:11, background:'#f8fafc', padding:10, borderRadius:8, overflow:'auto'}}>{JSON.stringify({ui: results.ui, ux: results.ux}, null, 2)}</pre>
+            <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
+              <MousePointer size={18} color="#f59e0b" /> Heuristic Evaluation
+            </h3>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 20 }}>
+              <div style={{ background: '#fffbeb', padding: 16, borderRadius: 12, border: '1px solid #fcd34d' }}>
+                <div style={{ fontSize: 32, fontWeight: 800, color: '#d97706', marginBottom: 4 }}>{vision.ui?.overall}</div>
+                <div style={{ fontSize: 12, fontWeight: 700, color: '#b45309' }}>UI Score</div>
+              </div>
+              <div style={{ background: '#ecfdf5', padding: 16, borderRadius: 12, border: '1px solid #6ee7b7' }}>
+                <div style={{ fontSize: 32, fontWeight: 800, color: '#059669', marginBottom: 4 }}>{vision.ux?.overall}</div>
+                <div style={{ fontSize: 12, fontWeight: 700, color: '#047857' }}>UX Score</div>
+              </div>
+            </div>
+
+            <InfoCard title="Visual Hierarchy Analysis" color="#f59e0b">
+              {vision.ui?.visual_hierarchy?.analysis || "Analisis hierarki visual tidak tersedia."}
+            </InfoCard>
+
+            <h4 style={{ fontSize: 14, fontWeight: 700, margin: '20px 0 12px' }}>Nielsen Heuristics Check</h4>
+            <div style={{ display: 'grid', gap: 10 }}>
+              {vision.ux?.usability_heuristics && Object.entries(vision.ux.usability_heuristics).map(([key, val]: any, i) => (
+                <div key={i} style={{ padding: 12, background: '#f8fafc', borderRadius: 8 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                    <span style={{ fontSize: 12, fontWeight: 600, textTransform: 'capitalize' }}>{key.replace(/_/g, ' ')}</span>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: val.score >= 7 ? '#10b981' : '#ef4444' }}>{val.score}/10</span>
+                  </div>
+                  <div style={{ fontSize: 12, color: '#64748b' }}>{val.observation}</div>
+                </div>
+              ))}
+            </div>
           </div>
         )}
+
+        {/* === TAB: MARKETING === */}
         {tab === 'mkt' && (
           <div>
-            <h3 style={{marginBottom:10}}>Marketing Analysis</h3>
-            <pre style={{fontSize:11, background:'#f8fafc', padding:10, borderRadius:8, overflow:'auto'}}>{JSON.stringify(results.mkt, null, 2)}</pre>
+            <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
+              <Megaphone size={18} color="#8b5cf6" /> Marketing Mix 7P Strategy
+            </h3>
+
+            <div style={{ background: '#f5f3ff', padding: 16, borderRadius: 12, marginBottom: 20 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                <span style={{ fontSize: 13, fontWeight: 600, color: '#5b21b6' }}>Brand Archetype</span>
+                <span style={{ background: '#7c3aed', color: '#fff', padding: '4px 12px', borderRadius: 20, fontSize: 11, fontWeight: 700 }}>
+                  {mkt.brand_authority?.brand_archetype || "Undetermined"}
+                </span>
+              </div>
+              <p style={{ fontSize: 13, color: '#4c1d95', margin: 0 }}>{mkt.brand_authority?.analysis}</p>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 12 }}>
+              {mkt.marketing_mix_7p && Object.entries(mkt.marketing_mix_7p).map(([key, val]: any, i) => (
+                <div key={i} style={{ border: '1px solid #e2e8f0', borderRadius: 8, padding: 12 }}>
+                  <div style={{ fontSize: 11, textTransform: 'uppercase', color: '#94a3b8', fontWeight: 700, marginBottom: 4 }}>{key}</div>
+                  <div style={{ fontSize: 12, color: '#334155', lineHeight: '1.4' }}>{val}</div>
+                </div>
+              ))}
+            </div>
           </div>
         )}
+
+        {/* === TAB: WEBQUAL === */}
         {tab === 'wq' && (
           <div>
-            <h3 style={{marginBottom:10}}>WebQual 4.0</h3>
-            <pre style={{fontSize:11, background:'#f8fafc', padding:10, borderRadius:8, overflow:'auto'}}>{JSON.stringify(results.wq, null, 2)}</pre>
+            <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
+              <Award size={18} color="#0ea5e9" /> WebQual 4.0 Methodology
+            </h3>
+
+            <div style={{ background: '#f0f9ff', padding: 16, borderRadius: 12, marginBottom: 20, borderLeft: '4px solid #0ea5e9' }}>
+              <h4 style={{ fontSize: 13, fontWeight: 700, color: '#0369a1', marginBottom: 8 }}>Calculation Formula</h4>
+              <code style={{ fontSize: 11, background: '#fff', padding: '4px 8px', borderRadius: 4, color: '#0c4a6e', display: 'block' }}>
+                {wq.overall.calc}
+              </code>
+              <p style={{ fontSize: 12, color: '#075985', marginTop: 8 }}>
+                Skor ini dihitung berdasarkan framework akademik Barnes & Vidgen (2002) yang menggabungkan kualitas kegunaan, kualitas informasi, dan kualitas interaksi layanan.
+              </p>
+            </div>
+
+            <div style={{ display: 'grid', gap: 12 }}>
+              <ListItem label="Usability Dimension (33%)" value={`${wq.usability.score.toFixed(2)}/5.0`} />
+              <ListItem label="Information Quality (33%)" value={`${wq.information.score.toFixed(2)}/5.0`} />
+              <ListItem label="Service Interaction (34%)" value={`${wq.service.score.toFixed(2)}/5.0`} />
+            </div>
           </div>
         )}
+
       </div>
 
-      <button onClick={reset} style={{ width: '100%', marginTop: 16, padding: 12, fontSize: 13, fontWeight: 600, background: '#f1f5f9', border: 'none', borderRadius: 8, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
-        <RefreshCw size={14} /> New Analysis
+      <button onClick={reset} style={{ width: '100%', marginTop: 24, padding: 14, fontSize: 14, fontWeight: 600, background: '#f1f5f9', border: 'none', borderRadius: 12, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, color: '#475569', transition: 'background 0.2s' }}>
+        <RefreshCw size={16} /> Mulai Analisis Baru
       </button>
     </div>
   );
