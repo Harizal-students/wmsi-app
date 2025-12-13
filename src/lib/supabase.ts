@@ -25,7 +25,7 @@ export interface AnalysisSession {
   webqual_data: object;
   user_agent?: string;
   ip_address?: string;
-  user_id?: string | null; // NEW: Added user_id
+  user_id?: string | null;
 }
 
 // Save analysis session to database
@@ -60,18 +60,18 @@ export async function getUserHistory(userId: string) {
   return data;
 }
 
-// Get analysis session by ID
-export async function getAnalysisSessionById(id: string) {
-  const { data, error } = await supabase
+// === NEW: Transfer Data to System (Anonymize) ===
+// Ini dijalankan saat user "Hapus Akun". Data tetap ada, tapi user_id jadi NULL.
+export async function detachUserHistory(userId: string) {
+  // Update semua history user ini menjadi NULL (milik sistem/anonymous)
+  const { error } = await supabase
     .from('analysis_sessions')
-    .select('*')
-    .eq('id', id)
-    .single();
+    .update({ user_id: null }) 
+    .eq('user_id', userId);
 
   if (error) {
-    console.error('Error fetching session:', error);
+    console.error('Error detaching history:', error);
     throw error;
   }
-
-  return data;
+  return true;
 }
