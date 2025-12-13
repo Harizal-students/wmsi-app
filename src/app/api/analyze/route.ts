@@ -2,12 +2,11 @@ import { NextRequest, NextResponse } from 'next/server';
 import Anthropic from '@anthropic-ai/sdk';
 import { createClient } from '@supabase/supabase-js';
 
-// Konfigurasi Runtime Server
-export const runtime = 'nodejs'; // Node.js runtime untuk performa I/O stabil
-export const maxDuration = 60;   // Timeout diperpanjang untuk "Deep Thinking"
+export const runtime = 'nodejs';
+export const maxDuration = 60; // Timeout 60 detik
 export const dynamic = 'force-dynamic';
 
-// 1. Inisialisasi Clients
+// Init Clients
 const anthropic = new Anthropic({
   apiKey: process.env.CLAUDE_API_KEY,
 });
@@ -18,57 +17,45 @@ const supabase = createClient(
 );
 
 // === FITUR 1: AI LEARNING (RAG SYSTEM) ===
-// Fungsi ini mengambil "Memori Kolektif" dari analisis sukses sebelumnya
 async function getKnowledgeBase(taskType: string) {
   try {
-    // Strategi: Ambil 3 analisis dengan skor WebQual tertinggi sebagai "Gold Standard"
-    // Kita filter yang datanya lengkap (tidak null)
+    // Ambil 3 analisis terbaik sebagai referensi
     const { data: bestExamples, error } = await supabase
       .from('analysis_sessions')
       .select('domain, seo_score, webqual_score, seo_data, marketing_data, uiux_data')
-      .not('webqual_score', 'is', null) // Pastikan skor ada
-      .gte('webqual_score', 75)         // Hanya ambil contoh yang BAGUS (>75)
+      .not('webqual_score', 'is', null)
+      .gte('webqual_score', 75)
       .order('webqual_score', { ascending: false })
       .limit(3);
 
     if (error || !bestExamples || bestExamples.length === 0) {
-      console.log('Knowledge Base: No high-quality history found yet. Running Zero-shot.');
+      console.log('[RAG] No history found. Running standard analysis.');
       return ''; 
     }
 
-    console.log(`[RAG] Retrieved ${bestExamples.length} high-quality past analyses for context.`);
-
-    // Format data historis menjadi teks yang bisa dibaca AI
     const contextString = bestExamples.map((ex, i) => {
-      // Ambil insight spesifik berdasarkan task
-      let specificInsight = '';
-      if (taskType.includes('SEO')) {
-        specificInsight = `SEO Strategy: ${(ex.seo_data as any)?.overallSEO?.visibility || 'N/A'}`;
-      } else if (taskType.includes('Marketing')) {
-        specificInsight = `Brand Archetype: ${(ex.marketing_data as any)?.brand_authority?.brand_archetype || 'N/A'}`;
-      } else {
-        specificInsight = `UI Strength: ${(ex.uiux_data as any)?.ui?.visual_hierarchy?.analysis?.substring(0, 50) || 'N/A'}...`;
-      }
+      let insight = '';
+      if (taskType.includes('SEO')) insight = `SEO: ${(ex.seo_data as any)?.overallSEO?.visibility || 'N/A'}`;
+      else if (taskType.includes('Marketing')) insight = `Brand: ${(ex.marketing_data as any)?.brand_authority?.brand_archetype || 'N/A'}`;
+      else insight = `UI: ${(ex.uiux_data as any)?.ui?.visual_hierarchy?.analysis?.substring(0, 30) || 'N/A'}...`;
 
-      return `[Example ${i+1}] Domain: ${ex.domain} | WebQual Score: ${ex.webqual_score} | ${specificInsight}`;
+      return `[Ex ${i+1}] ${ex.domain} (WQ: ${ex.webqual_score}) - ${insight}`;
     }).join('\n');
 
-    return `\n\n=== KNOWLEDGE BASE (HISTORICAL DATA) ===\nGunakan data analisis sukses sebelumnya ini sebagai standar benchmark kualitas:\n${contextString}\n========================================\n`;
+    return `\n\n[HISTORICAL CONTEXT]\n${contextString}\n`;
 
   } catch (error) {
-    console.error('RAG System Warning:', error);
-    return ''; // Fail-safe: Jika DB error, tetap jalan tanpa RAG
+    console.error('[RAG Error]:', error);
+    return ''; 
   }
 }
 
-// === FITUR 2: ANTI-HALLUCINATION PROTOCOL ===
-const SAFETY_INSTRUCTIONS = `
-*** ANTI-HALLUCINATION RULES (STRICT) ***
-1. DO NOT invent organic traffic numbers, bounce rates, or specific backlinks unless explicitly provided in the prompt.
-2. If you cannot see a specific UI element in the screenshot (e.g., specific dropdown menu items), DO NOT guess. State "Not visible in screenshot".
-3. For SEO analysis, purely analyze the visible semantic structure and content strategy. Do not make up technical server logs.
-4. Base your Marketing analysis strictly on the visible "Value Proposition" and "Copywriting".
-5. If you are unsure, output neutral scores (e.g., 50/100) or generic placeholders rather than fake specific data.
+// === FITUR 2: ANTI-HALLUCINATION ===
+const SAFETY_RULES = `
+RULES:
+1. Strict JSON output only. No text before/after.
+2. If UI elements are not visible in the screenshot, say "Not visible".
+3. Do not invent traffic numbers.
 `;
 
 export async function POST(request: NextRequest) {
@@ -77,66 +64,84 @@ export async function POST(request: NextRequest) {
     const { messages, task } = body;
 
     if (!messages || !Array.isArray(messages)) {
-      return NextResponse.json({ error: 'Messages array required' }, { status: 400 });
+      return NextResponse.json({ error: 'Messages required' }, { status: 400 });
     }
 
-    // A. Aktifkan RAG: Ambil konteks pembelajaran
+    console.log(`[AI] Starting Task: ${task}`);
+
+    // 1. Inject Knowledge (RAG)
     const learningContext = await getKnowledgeBase(task || 'General');
     
-    // B. Konstruksi Prompt Cerdas
-    // Kita menyuntikkan (Inject) konteks RAG + Aturan Keamanan ke pesan terakhir user
+    // 2. Modifikasi pesan terakhir user
     const lastMessage = messages[messages.length - 1];
-    
     if (lastMessage && lastMessage.role === 'user') {
-      const injectionContent = `${learningContext}\n\n${SAFETY_INSTRUCTIONS}\n\nLakukan analisis sekarang untuk target berikut:`;
+      const instruction = `${learningContext}\n${SAFETY_RULES}\nAnalyze now:`;
       
-      // Handle Text vs Vision (Array) content
       if (typeof lastMessage.content === 'string') {
-        lastMessage.content = injectionContent + "\n" + lastMessage.content;
+        lastMessage.content = instruction + "\n" + lastMessage.content;
       } else if (Array.isArray(lastMessage.content)) {
-        // Untuk vision, sisipkan teks instruksi di awal array
-        lastMessage.content.unshift({ 
-          type: 'text', 
-          text: injectionContent 
-        });
+        // Untuk Vision (Gambar), taruh instruksi di text block pertama
+        const textBlockIndex = lastMessage.content.findIndex((c: any) => c.type === 'text');
+        if (textBlockIndex >= 0) {
+          lastMessage.content[textBlockIndex].text = instruction + "\n" + lastMessage.content[textBlockIndex].text;
+        } else {
+          lastMessage.content.unshift({ type: 'text', text: instruction });
+        }
       }
     }
 
-    console.log(`[AI Engine] Processing: ${task} | Model: Claude 3.5 Sonnet`);
+    // 3. Call Claude AI (DENGAN MODEL YANG BENAR SESUAI CSV)
+    console.log('[AI] Calling Anthropic API...');
+    
+    try {
+      const response = await anthropic.messages.create({
+        // PERBAIKAN: Menggunakan nama model yang sesuai dengan CSV Anda
+        model: 'claude-sonnet-4-20250514', 
+        max_tokens: 2500,
+        messages: messages,
+        temperature: 0.3, 
+      });
 
-    // C. Eksekusi AI
-    const response = await anthropic.messages.create({
-      model: 'claude-3-5-sonnet-20240620', // Gunakan model terbaru untuk reasoning terbaik
-      max_tokens: 3000, // Token besar untuk output JSON panjang
-      messages: messages,
-      temperature: 0.3, // Rendah = Lebih faktual, Mengurangi halusinasi
-      system: "Anda adalah Konsultan Audit Digital Senior yang objektif, faktual, dan akademis. Output Anda selalu dalam format JSON valid tanpa teks pengantar."
-    });
+      const textContent = response.content
+        .filter((block): block is Anthropic.TextBlock => block.type === 'text')
+        .map(block => block.text)
+        .join('\n');
 
-    // D. Parsing Response
-    const textContent = response.content
-      .filter((block): block is Anthropic.TextBlock => block.type === 'text')
-      .map(block => block.text)
-      .join('\n');
+      // 4. Clean JSON Output
+      let cleanJson = textContent;
+      const jsonMatch = textContent.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        cleanJson = jsonMatch[0];
+      }
 
-    // E. Validasi JSON Sederhana (Self-Correction)
-    // Jika output ada teks tambahan di luar JSON, kita coba bersihkan
-    let cleanJson = textContent;
-    const jsonMatch = textContent.match(/\{[\s\S]*\}/);
-    if (jsonMatch) {
-      cleanJson = jsonMatch[0];
+      console.log(`[AI] Success. Tokens used: ${response.usage.output_tokens}`);
+
+      return NextResponse.json({ 
+        content: cleanJson,
+        usage: response.usage
+      });
+
+    } catch (apiError: any) {
+      console.error('[Anthropic API Error]:', apiError);
+      
+      // Deteksi Error Spesifik
+      if (apiError.status === 404) {
+        return NextResponse.json({ error: 'Model AI tidak ditemukan. Cek API Key.' }, { status: 404 });
+      }
+      if (apiError.status === 401) {
+        return NextResponse.json({ error: 'API Key tidak valid.' }, { status: 401 });
+      }
+      if (apiError.status === 429) {
+        return NextResponse.json({ error: 'Rate limit tercapai. Tunggu sebentar.' }, { status: 429 });
+      }
+      
+      throw apiError; // Lempar ke catch bawah untuk 500 generic
     }
 
-    return NextResponse.json({ 
-      content: cleanJson,
-      usage: response.usage,
-      learning_active: !!learningContext // Flag untuk debugging frontend jika perlu
-    });
-
   } catch (error: any) {
-    console.error('[AI Analysis Failed]:', error.message);
+    console.error('[Server Error]:', error.message);
     return NextResponse.json(
-      { error: error.message || 'AI processing failed' },
+      { error: error.message || 'Internal Analysis Error' },
       { status: 500 }
     );
   }
