@@ -3,10 +3,9 @@ import Anthropic from '@anthropic-ai/sdk';
 import { createClient } from '@supabase/supabase-js';
 
 export const runtime = 'nodejs';
-export const maxDuration = 60; // Timeout 60 detik
+export const maxDuration = 60;
 export const dynamic = 'force-dynamic';
 
-// Init Clients
 const anthropic = new Anthropic({
   apiKey: process.env.CLAUDE_API_KEY,
 });
@@ -16,46 +15,45 @@ const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
 
-// === FITUR 1: AI LEARNING (RAG SYSTEM) ===
+// === AI LEARNING (RAG) ===
 async function getKnowledgeBase(taskType: string) {
   try {
-    // Ambil 3 analisis terbaik sebagai referensi
-    const { data: bestExamples, error } = await supabase
+    const { data: bestExamples } = await supabase
       .from('analysis_sessions')
       .select('domain, seo_score, webqual_score, seo_data, marketing_data, uiux_data')
       .not('webqual_score', 'is', null)
-      .gte('webqual_score', 75)
+      .gte('webqual_score', 70) // Turunkan sedikit threshold agar lebih mudah dapat contoh
       .order('webqual_score', { ascending: false })
-      .limit(3);
+      .limit(2); // Ambil 2 saja biar hemat token
 
-    if (error || !bestExamples || bestExamples.length === 0) {
-      console.log('[RAG] No history found. Running standard analysis.');
-      return ''; 
-    }
+    if (!bestExamples || bestExamples.length === 0) return '';
 
     const contextString = bestExamples.map((ex, i) => {
       let insight = '';
-      if (taskType.includes('SEO')) insight = `SEO: ${(ex.seo_data as any)?.overallSEO?.visibility || 'N/A'}`;
-      else if (taskType.includes('Marketing')) insight = `Brand: ${(ex.marketing_data as any)?.brand_authority?.brand_archetype || 'N/A'}`;
-      else insight = `UI: ${(ex.uiux_data as any)?.ui?.visual_hierarchy?.analysis?.substring(0, 30) || 'N/A'}...`;
+      if (taskType.includes('SEO')) insight = `SEO Vis: ${(ex.seo_data as any)?.overallSEO?.visibility}`;
+      else if (taskType.includes('Marketing')) insight = `Archetype: ${(ex.marketing_data as any)?.brand_authority?.brand_archetype}`;
+      else insight = `UI Strength: Good Hierarchy`;
 
-      return `[Ex ${i+1}] ${ex.domain} (WQ: ${ex.webqual_score}) - ${insight}`;
+      return `[Ref ${i+1}] ${ex.domain} (WQ: ${ex.webqual_score}) - ${insight}`;
     }).join('\n');
 
-    return `\n\n[HISTORICAL CONTEXT]\n${contextString}\n`;
-
+    return `\n\n[BENCHMARK DATA]\n${contextString}\n`;
   } catch (error) {
-    console.error('[RAG Error]:', error);
     return ''; 
   }
 }
 
-// === FITUR 2: ANTI-HALLUCINATION ===
+// === PERBAIKAN: SAFETY RULES YANG LEBIH CERDAS ===
 const SAFETY_RULES = `
-RULES:
-1. Strict JSON output only. No text before/after.
-2. If UI elements are not visible in the screenshot, say "Not visible".
-3. Do not invent traffic numbers.
+*** STRICT OUTPUT RULES ***
+1. OUTPUT FORMAT: ONLY valid JSON. No introductory text.
+2. SCORING RULES (CRITICAL): 
+   - All fields named "score", "overall", "rank", or "volume" MUST be NUMBERS (0-100 or 0-10). 
+   - NEVER output strings like "Not visible" or "N/A" for scores.
+   - If you cannot see an element to score it, estimate a neutral score (e.g., 50 or 5) based on general heuristics.
+3. TEXT RULES:
+   - For descriptive fields (analysis, reasoning), you MAY use "Not visible in screenshot" if the element is missing.
+4. FACTS: Do not invent specific traffic numbers. Use estimates like "Low", "Medium", "High".
 `;
 
 export async function POST(request: NextRequest) {
@@ -67,82 +65,56 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Messages required' }, { status: 400 });
     }
 
-    console.log(`[AI] Starting Task: ${task}`);
+    console.log(`[AI] Processing Task: ${task}`);
 
-    // 1. Inject Knowledge (RAG)
     const learningContext = await getKnowledgeBase(task || 'General');
     
-    // 2. Modifikasi pesan terakhir user
+    // Inject Rules
     const lastMessage = messages[messages.length - 1];
     if (lastMessage && lastMessage.role === 'user') {
-      const instruction = `${learningContext}\n${SAFETY_RULES}\nAnalyze now:`;
+      const instruction = `${learningContext}\n${SAFETY_RULES}\n\nAnalyze the provided content/image now:`;
       
       if (typeof lastMessage.content === 'string') {
         lastMessage.content = instruction + "\n" + lastMessage.content;
       } else if (Array.isArray(lastMessage.content)) {
-        // Untuk Vision (Gambar), taruh instruksi di text block pertama
-        const textBlockIndex = lastMessage.content.findIndex((c: any) => c.type === 'text');
-        if (textBlockIndex >= 0) {
-          lastMessage.content[textBlockIndex].text = instruction + "\n" + lastMessage.content[textBlockIndex].text;
+        // Pastikan instruksi masuk ke block text
+        const textBlock = lastMessage.content.find((c: any) => c.type === 'text');
+        if (textBlock) {
+          textBlock.text = instruction + "\n" + textBlock.text;
         } else {
           lastMessage.content.unshift({ type: 'text', text: instruction });
         }
       }
     }
 
-    // 3. Call Claude AI (DENGAN MODEL YANG BENAR SESUAI CSV)
-    console.log('[AI] Calling Anthropic API...');
-    
-    try {
-      const response = await anthropic.messages.create({
-        // PERBAIKAN: Menggunakan nama model yang sesuai dengan CSV Anda
-        model: 'claude-sonnet-4-20250514', 
-        max_tokens: 2500,
-        messages: messages,
-        temperature: 0.3, 
-      });
+    // Call AI (Model sesuai CSV Anda)
+    const response = await anthropic.messages.create({
+      model: 'claude-sonnet-4-20250514', 
+      max_tokens: 3000,
+      messages: messages,
+      temperature: 0.2, // Lebih rendah lagi agar lebih patuh aturan format
+    });
 
-      const textContent = response.content
-        .filter((block): block is Anthropic.TextBlock => block.type === 'text')
-        .map(block => block.text)
-        .join('\n');
+    const textContent = response.content
+      .filter((block): block is Anthropic.TextBlock => block.type === 'text')
+      .map(block => block.text)
+      .join('\n');
 
-      // 4. Clean JSON Output
-      let cleanJson = textContent;
-      const jsonMatch = textContent.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        cleanJson = jsonMatch[0];
-      }
+    // JSON Cleaning
+    let cleanJson = textContent;
+    const jsonMatch = textContent.match(/\{[\s\S]*\}/);
+    if (jsonMatch) cleanJson = jsonMatch[0];
 
-      console.log(`[AI] Success. Tokens used: ${response.usage.output_tokens}`);
-
-      return NextResponse.json({ 
-        content: cleanJson,
-        usage: response.usage
-      });
-
-    } catch (apiError: any) {
-      console.error('[Anthropic API Error]:', apiError);
-      
-      // Deteksi Error Spesifik
-      if (apiError.status === 404) {
-        return NextResponse.json({ error: 'Model AI tidak ditemukan. Cek API Key.' }, { status: 404 });
-      }
-      if (apiError.status === 401) {
-        return NextResponse.json({ error: 'API Key tidak valid.' }, { status: 401 });
-      }
-      if (apiError.status === 429) {
-        return NextResponse.json({ error: 'Rate limit tercapai. Tunggu sebentar.' }, { status: 429 });
-      }
-      
-      throw apiError; // Lempar ke catch bawah untuk 500 generic
-    }
+    return NextResponse.json({ 
+      content: cleanJson,
+      usage: response.usage
+    });
 
   } catch (error: any) {
-    console.error('[Server Error]:', error.message);
-    return NextResponse.json(
-      { error: error.message || 'Internal Analysis Error' },
-      { status: 500 }
-    );
+    console.error('[AI Error]:', error);
+    // Handle error status spesifik
+    const status = error.status || 500;
+    const msg = error.error?.message || error.message || 'AI Processing Error';
+    return NextResponse.json({ error: msg }, { status });
   }
 }
