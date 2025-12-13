@@ -1,16 +1,19 @@
 import React from 'react';
-import { History, XCircle, ArrowRight } from 'lucide-react';
+import { History, XCircle } from 'lucide-react';
 import { AnalysisSession } from '@/lib/supabase';
 
 type Props = {
   isOpen: boolean;
   onClose: () => void;
-  history: AnalysisSession[];
+  history: AnalysisSession[]; // Pastikan ini array
   onLoad: (session: AnalysisSession) => void;
 };
 
 export default function HistorySidebar({ isOpen, onClose, history, onLoad }: Props) {
   if (!isOpen) return null;
+
+  // SAFETY CHECK: Pastikan history adalah array
+  const safeHistory = Array.isArray(history) ? history : [];
 
   return (
     <div style={{ position: 'fixed', top: 0, right: 0, bottom: 0, width: 300, background: '#fff', borderLeft: '1px solid #e2e8f0', zIndex: 50, padding: 20, boxShadow: '-4px 0 15px rgba(0,0,0,0.05)', overflowY: 'auto' }}>
@@ -31,30 +34,30 @@ export default function HistorySidebar({ isOpen, onClose, history, onLoad }: Pro
       </div>
 
       {/* List */}
-      {history.length === 0 ? (
+      {safeHistory.length === 0 ? (
         <div style={{ textAlign: 'center', padding: 40, color: '#64748b', fontSize: 13 }}>
           <p>Belum ada riwayat analisis.</p>
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          {history.map((h: any) => (
+          {safeHistory.map((h: any) => (
             <div 
-              key={h.id} 
+              key={h.id || Math.random()} 
               onClick={() => onLoad(h)} 
               className="group"
               style={{ padding: 12, border: '1px solid #e2e8f0', borderRadius: 8, cursor: 'pointer', background: '#f8fafc', transition: 'all 0.2s', position: 'relative' }}
             >
               <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: '#334155' }}>
-                {h.domain}
+                {h.domain || h.url}
               </div>
               <div style={{ fontSize: 11, color: '#64748b', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span>{new Date(h.created_at).toLocaleDateString('id-ID', {day: 'numeric', month: 'short'})}</span>
+                <span>{h.created_at ? new Date(h.created_at).toLocaleDateString('id-ID', {day: 'numeric', month: 'short'}) : '-'}</span>
                 <span style={{ 
                   fontWeight: 700, 
-                  color: h.webqual_score >= 80 ? '#10b981' : h.webqual_score >= 60 ? '#f59e0b' : '#ef4444',
+                  color: (h.webqual_score || 0) >= 80 ? '#10b981' : (h.webqual_score || 0) >= 60 ? '#f59e0b' : '#ef4444',
                   background: '#fff', padding: '2px 6px', borderRadius: 4, border: '1px solid #e2e8f0'
                 }}>
-                  WQ: {h.webqual_score.toFixed(0)}
+                  WQ: {(h.webqual_score || 0).toFixed(0)}
                 </span>
               </div>
             </div>

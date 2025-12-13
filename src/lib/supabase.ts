@@ -5,7 +5,6 @@ const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
-// Types for database
 export interface AnalysisSession {
   id?: string;
   created_at?: string;
@@ -25,26 +24,35 @@ export interface AnalysisSession {
   webqual_data: object;
   user_agent?: string;
   ip_address?: string;
-  user_id?: string | null; // Kolom penting untuk Auth & Learning
+  user_id?: string | null;
 }
 
 // 1. Save analysis session
 export async function saveAnalysisSession(session: AnalysisSession) {
+  // Bersihkan data sebelum kirim: Pastikan user_id null jika undefined
+  const cleanSession = {
+    ...session,
+    user_id: session.user_id || null
+  };
+
   const { data, error } = await supabase
     .from('analysis_sessions')
-    .insert([session])
+    .insert([cleanSession])
     .select()
     .single();
 
   if (error) {
-    console.error('Error saving session:', error);
-    throw error;
+    console.error('SUPABASE SAVE ERROR:', error.message, error.details);
+    throw new Error(error.message); // Throw agar UI tau ada error
   }
+
   return data;
 }
 
-// 2. Get User History (Untuk Sidebar)
+// 2. Get User History
 export async function getUserHistory(userId: string) {
+  if (!userId) return []; // Jangan fetch jika tidak ada user
+
   const { data, error } = await supabase
     .from('analysis_sessions')
     .select('*')
@@ -52,38 +60,23 @@ export async function getUserHistory(userId: string) {
     .order('created_at', { ascending: false });
 
   if (error) {
-    console.error('Error fetching history:', error);
-    throw error;
+    console.error('HISTORY FETCH ERROR:', error);
+    return []; // Return array kosong biar tidak crash "map is not function"
   }
-  return data;
+
+  return data || [];
 }
 
-// 3. Detach User History (Untuk Hapus Akun -> Jadi Data Training)
+// 3. Detach User History
 export async function detachUserHistory(userId: string) {
-  // Update user_id menjadi NULL agar data menjadi anonim milik sistem
   const { error } = await supabase
     .from('analysis_sessions')
     .update({ user_id: null }) 
     .eq('user_id', userId);
 
   if (error) {
-    console.error('Error detaching history:', error);
+    console.error('DETACH ERROR:', error);
     throw error;
   }
   return true;
-}
-
-// 4. Get Analysis Session by ID (Optional utility)
-export async function getAnalysisSessionById(id: string) {
-  const { data, error } = await supabase
-    .from('analysis_sessions')
-    .select('*')
-    .eq('id', id)
-    .single();
-
-  if (error) {
-    console.error('Error fetching session:', error);
-    throw error;
-  }
-  return data;
 }
