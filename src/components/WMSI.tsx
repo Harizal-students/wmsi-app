@@ -5,7 +5,7 @@ import {
   Globe, Search, CheckCircle, XCircle, AlertTriangle, FileText, Palette, 
   RefreshCw, ChevronDown, TrendingUp, Award, Target, MousePointer, Lightbulb, 
   PieChart, Megaphone, LayoutGrid, Cpu, Beaker, Brain, Camera, Monitor, 
-  Smartphone, Shield, Database, Zap
+  Smartphone, Shield, Database, Zap, AlertCircle
 } from 'lucide-react';
 import { saveAnalysisSession, AnalysisSession } from '@/lib/supabase';
 
@@ -28,16 +28,17 @@ export default function WMSI() {
   const desktopInputRef = useRef<HTMLInputElement>(null);
   const mobileInputRef = useRef<HTMLInputElement>(null);
   
-  // OPTIMIZED: Reduced max uploads for faster processing
-  const MAX_DESKTOP = 2; // Reduced from 3
-  const MAX_MOBILE = 1;  // Reduced from 2
+  // ULTRA OPTIMIZED: Only 1 screenshot each for Vercel Free
+  const MAX_DESKTOP = 1;
+  const MAX_MOBILE = 1;
   
-  // OPTIMIZED: Aggressive compression settings for Vercel Free Tier
+  // ULTRA AGGRESSIVE compression for Vercel 4.5MB limit
+  // Base64 adds ~33%, so 50KB image = ~67KB in request
   const COMPRESSION_CONFIG = {
-    maxWidth: 800,      // Reduced from 2000
-    maxHeight: 600,     // Reduced from 2000
-    quality: 0.6,       // Reduced from 0.8
-    maxSizeKB: 150      // Target max 150KB per image
+    maxWidth: 600,       // Reduced from 800
+    maxHeight: 450,      // Reduced from 600
+    quality: 0.5,        // Reduced from 0.6
+    maxSizeKB: 80        // Target max 80KB per image (very small)
   };
 
   const methodologies = {
@@ -75,8 +76,6 @@ export default function WMSI() {
     return 'Perlu Perbaikan';
   };
 
-  const toggle = (id: string) => setExpanded(prev => ({ ...prev, [id]: !prev[id] }));
-
   const parseJSON = (text: string) => {
     try {
       const match = text && text.match(/\{[\s\S]*\}/);
@@ -86,7 +85,7 @@ export default function WMSI() {
     }
   };
 
-  // OPTIMIZED: Aggressive image compression function
+  // ULTRA AGGRESSIVE image compression
   const compressImage = (file: File): Promise<{base64: string; preview: string; mediaType: string; size: number}> => {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
@@ -107,47 +106,56 @@ export default function WMSI() {
             return;
           }
           
-          // Calculate new dimensions
+          // Calculate dimensions - AGGRESSIVE scaling
           let w = img.width;
           let h = img.height;
           const { maxWidth, maxHeight } = COMPRESSION_CONFIG;
           
-          // Scale down if needed
-          if (w > maxWidth || h > maxHeight) {
-            const ratio = Math.min(maxWidth / w, maxHeight / h);
-            w = Math.round(w * ratio);
-            h = Math.round(h * ratio);
-          }
+          // Always scale down to fit within bounds
+          const ratio = Math.min(maxWidth / w, maxHeight / h, 1);
+          w = Math.round(w * ratio);
+          h = Math.round(h * ratio);
           
           canvas.width = w;
           canvas.height = h;
           
-          // Draw with white background (for transparency)
+          // White background
           ctx.fillStyle = '#FFFFFF';
           ctx.fillRect(0, 0, w, h);
           ctx.drawImage(img, 0, 0, w, h);
           
-          // Iterative compression to reach target size
+          // Iterative compression - start low
           let quality = COMPRESSION_CONFIG.quality;
           let dataUrl = canvas.toDataURL('image/jpeg', quality);
           let sizeKB = (dataUrl.length * 0.75) / 1024;
           
-          // Reduce quality until under target size
-          while (sizeKB > COMPRESSION_CONFIG.maxSizeKB && quality > 0.3) {
-            quality -= 0.1;
+          // Aggressively reduce until under target
+          while (sizeKB > COMPRESSION_CONFIG.maxSizeKB && quality > 0.2) {
+            quality -= 0.05;
             dataUrl = canvas.toDataURL('image/jpeg', quality);
             sizeKB = (dataUrl.length * 0.75) / 1024;
           }
           
           // If still too large, reduce dimensions further
           if (sizeKB > COMPRESSION_CONFIG.maxSizeKB) {
-            const scale = 0.7;
+            const scale = 0.6;
             canvas.width = Math.round(w * scale);
             canvas.height = Math.round(h * scale);
             ctx.fillStyle = '#FFFFFF';
             ctx.fillRect(0, 0, canvas.width, canvas.height);
             ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-            dataUrl = canvas.toDataURL('image/jpeg', 0.5);
+            dataUrl = canvas.toDataURL('image/jpeg', 0.4);
+            sizeKB = (dataUrl.length * 0.75) / 1024;
+          }
+          
+          // Final fallback - super small
+          if (sizeKB > COMPRESSION_CONFIG.maxSizeKB) {
+            canvas.width = 400;
+            canvas.height = 300;
+            ctx.fillStyle = '#FFFFFF';
+            ctx.fillRect(0, 0, 400, 300);
+            ctx.drawImage(img, 0, 0, 400, 300);
+            dataUrl = canvas.toDataURL('image/jpeg', 0.3);
             sizeKB = (dataUrl.length * 0.75) / 1024;
           }
           
@@ -171,20 +179,18 @@ export default function WMSI() {
     for (const file of files) {
       if (file.type.startsWith('image/')) {
         try {
-          log('info', 'upload', 'Compressing Desktop: ' + file.name + ' (' + Math.round(file.size/1024) + 'KB)');
+          log('info', 'upload', 'Compressing Desktop: ' + file.name + ' (' + Math.round(file.size/1024) + 'KB original)');
           const c = await compressImage(file);
           const finalSizeKB = Math.round(c.size / 1024);
-          log('success', 'upload', 'Desktop ready: ' + finalSizeKB + 'KB (optimized for speed)');
+          log('success', 'upload', 'Desktop compressed: ' + finalSizeKB + 'KB (optimized)');
           setDesktopScreenshots(prev => [...prev, { base64: c.base64, name: file.name, mediaType: c.mediaType, size: c.size }]);
           setDesktopPreviews(prev => [...prev, c.preview]);
         } catch (err: any) {
-          log('error', 'upload', 'Failed to process: ' + err.message);
+          log('error', 'upload', 'Failed: ' + err.message);
         }
       }
     }
-    if (desktopInputRef.current) {
-      desktopInputRef.current.value = '';
-    }
+    if (desktopInputRef.current) desktopInputRef.current.value = '';
   };
 
   const handleMobileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -192,20 +198,18 @@ export default function WMSI() {
     for (const file of files) {
       if (file.type.startsWith('image/')) {
         try {
-          log('info', 'upload', 'Compressing Mobile: ' + file.name + ' (' + Math.round(file.size/1024) + 'KB)');
+          log('info', 'upload', 'Compressing Mobile: ' + file.name + ' (' + Math.round(file.size/1024) + 'KB original)');
           const c = await compressImage(file);
           const finalSizeKB = Math.round(c.size / 1024);
-          log('success', 'upload', 'Mobile ready: ' + finalSizeKB + 'KB (optimized for speed)');
+          log('success', 'upload', 'Mobile compressed: ' + finalSizeKB + 'KB (optimized)');
           setMobileScreenshots(prev => [...prev, { base64: c.base64, name: file.name, mediaType: c.mediaType, size: c.size }]);
           setMobilePreviews(prev => [...prev, c.preview]);
         } catch (err: any) {
-          log('error', 'upload', 'Failed to process: ' + err.message);
+          log('error', 'upload', 'Failed: ' + err.message);
         }
       }
     }
-    if (mobileInputRef.current) {
-      mobileInputRef.current.value = '';
-    }
+    if (mobileInputRef.current) mobileInputRef.current.value = '';
   };
 
   const removeDesktop = (i: number) => {
@@ -234,21 +238,30 @@ export default function WMSI() {
     setStage(id);
   };
 
-  // OPTIMIZED: API call with timeout handling
-  const callClaude = async (messages: any[], task: string, timeoutMs: number = 9000) => {
+  // API call with better error handling
+  const callClaude = async (messages: any[], task: string) => {
     const start = Date.now();
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
     
     try {
+      const bodyStr = JSON.stringify({ messages, task });
+      const bodySizeKB = bodyStr.length / 1024;
+      
+      // Check body size before sending (Vercel limit is 4.5MB)
+      if (bodySizeKB > 4000) {
+        throw new Error('Request too large (' + Math.round(bodySizeKB) + 'KB). Please use smaller images.');
+      }
+      
+      log('info', 'api', task + ' - sending ' + Math.round(bodySizeKB) + 'KB...');
+      
       const res = await fetch('/api/analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages, task }),
-        signal: controller.signal
+        body: bodyStr
       });
       
-      clearTimeout(timeoutId);
+      if (res.status === 413) {
+        throw new Error('Request too large (413). Images need more compression.');
+      }
       
       if (!res.ok) {
         const errText = await res.text();
@@ -264,13 +277,11 @@ export default function WMSI() {
       
       const data = await res.json();
       const duration = Date.now() - start;
-      log('success', 'api', task + ' (' + duration + 'ms)');
+      log('success', 'api', task + ' completed (' + duration + 'ms)');
       return { success: true, content: data.content, duration: duration };
     } catch (e: any) {
-      clearTimeout(timeoutId);
-      const errMsg = e.name === 'AbortError' ? 'Request timeout - image may be too large' : e.message;
-      log('error', 'api', task + ' failed: ' + errMsg);
-      return { success: false, error: errMsg };
+      log('error', 'api', task + ' failed: ' + e.message);
+      return { success: false, error: e.message };
     }
   };
 
@@ -279,12 +290,15 @@ export default function WMSI() {
       return;
     }
 
-    // Check total image size
-    const totalSize = [...desktopScreenshots, ...mobileScreenshots].reduce((a, b) => a + b.size, 0);
-    const totalSizeKB = Math.round(totalSize / 1024);
+    // Check total base64 size (this is what goes in the request)
+    const totalBase64Size = [...desktopScreenshots, ...mobileScreenshots]
+      .reduce((a, b) => a + b.base64.length, 0);
+    const totalBase64KB = Math.round(totalBase64Size / 1024);
     
-    if (totalSizeKB > 500) {
-      setError('Total ukuran gambar terlalu besar (' + totalSizeKB + 'KB). Maksimal 500KB untuk performa optimal.');
+    // Vercel limit is 4.5MB, but we need room for prompt text too
+    // So limit images to ~300KB total base64 (after encoding)
+    if (totalBase64KB > 300) {
+      setError('Total ukuran gambar terlalu besar (' + totalBase64KB + 'KB base64). Maksimal 300KB. Coba gambar yang lebih kecil.');
       return;
     }
 
@@ -303,63 +317,55 @@ export default function WMSI() {
 
       // PHASE 1: INIT
       setStg('init');
-      log('info', 'init', 'Memulai analisis: ' + nUrl);
-      log('info', 'init', 'Screenshots: ' + desktopScreenshots.length + ' Desktop + ' + mobileScreenshots.length + ' Mobile (' + totalSizeKB + 'KB total)');
+      log('info', 'init', 'Starting analysis: ' + nUrl);
+      log('info', 'init', 'Images: ' + desktopScreenshots.length + 'D + ' + mobileScreenshots.length + 'M (' + totalBase64KB + 'KB base64)');
 
-      // PHASE 2: SEO (no images, fast)
+      // PHASE 2: SEO (text only, fast)
       setStg('seo');
-      log('info', 'seo', 'Menganalisis SEO dan Keywords...');
+      log('info', 'seo', 'Analyzing SEO...');
 
-      const seoPrompt = `Kamu adalah SEO Expert. Analisis website ${nUrl} (domain: ${domain}). Identifikasi 5-8 kata kunci utama dengan estimasi ranking Google, volume, difficulty. Analisis On-Page SEO. Format JSON tanpa markdown: { "domain": "${domain}", "industri": "kategori", "keywords": [{"keyword": "kata", "estimatedRank": 15, "searchVolume": 1000, "difficulty": "Medium", "relevance": 9}], "onPageSEO": {"titleOptimization": {"score": 70, "reason": "penjelasan"}, "metaDescription": {"score": 65, "reason": "penjelasan"}, "urlStructure": {"score": 75, "reason": "penjelasan"}, "mobileReadiness": {"score": 70, "reason": "penjelasan"}, "technicalSEO": {"score": 65, "reason": "penjelasan"}}, "overallSEO": {"score": 68, "visibility": "Medium", "reason": "ringkasan"}, "topOpportunities": ["peluang1", "peluang2"], "criticalIssues": ["masalah1"] }`;
+      const seoPrompt = `SEO Expert: Analyze ${nUrl}. Return JSON only: {"domain":"${domain}","industri":"category","keywords":[{"keyword":"word","estimatedRank":15,"searchVolume":1000,"difficulty":"Medium"}],"onPageSEO":{"titleOptimization":{"score":70},"metaDescription":{"score":65},"urlStructure":{"score":75},"mobileReadiness":{"score":70},"technicalSEO":{"score":65}},"overallSEO":{"score":68,"visibility":"Medium"},"topOpportunities":["opp1"],"criticalIssues":["issue1"]}`;
 
-      const seoResult = await callClaude([{ role: 'user', content: seoPrompt }], 'SEO Analysis', 8000);
+      const seoResult = await callClaude([{ role: 'user', content: seoPrompt }], 'SEO');
       const seo = seoResult.success ? (parseJSON(seoResult.content) || { overallSEO: { score: 65 } }) : { overallSEO: { score: 65 } };
       
       if (seo.overallSEO) {
         log('success', 'seo', 'SEO Score: ' + seo.overallSEO.score + '/100');
       }
 
-      // PHASE 3: UI/UX VISION (with compressed images)
+      // PHASE 3: UI/UX VISION (with small images)
       setStg('ui');
-      log('info', 'ui', 'Analyzing with Vision AI (optimized images)...');
+      log('info', 'ui', 'Vision AI analyzing...');
 
       const visionContent: any[] = [];
       
-      // Add compressed desktop screenshots
+      // Add desktop
       desktopScreenshots.forEach((img, i) => {
-        visionContent.push({ type: 'text', text: '[DESKTOP ' + (i + 1) + ']' });
+        visionContent.push({ type: 'text', text: '[DESKTOP]' });
         visionContent.push({ 
           type: 'image', 
-          source: { 
-            type: 'base64', 
-            media_type: 'image/jpeg', 
-            data: img.base64 
-          } 
+          source: { type: 'base64', media_type: 'image/jpeg', data: img.base64 } 
         });
       });
       
-      // Add compressed mobile screenshots
+      // Add mobile
       mobileScreenshots.forEach((img, i) => {
-        visionContent.push({ type: 'text', text: '[MOBILE ' + (i + 1) + ']' });
+        visionContent.push({ type: 'text', text: '[MOBILE]' });
         visionContent.push({ 
           type: 'image', 
-          source: { 
-            type: 'base64', 
-            media_type: 'image/jpeg', 
-            data: img.base64 
-          } 
+          source: { type: 'base64', media_type: 'image/jpeg', data: img.base64 } 
         });
       });
 
-      // OPTIMIZED: Shorter prompt for faster processing
-      const visionPrompt = `Analisis UI/UX screenshot website ${nUrl}. Format JSON singkat: { "desktop": { "hierarchy": {"score": 75, "reason": "singkat"}, "color": {"score": 70, "reason": "singkat"}, "typography": {"score": 72, "reason": "singkat"}, "layout": {"score": 74, "reason": "singkat"}, "overall": 73 }, "mobile": { "hierarchy": {"score": 78, "reason": "singkat"}, "touchTargets": {"score": 74, "reason": "singkat"}, "overall": 75 }, "ux": { "heuristics": { "visibility": {"score": 7}, "match": {"score": 7}, "control": {"score": 6}, "consistency": {"score": 7}, "prevention": {"score": 6}, "recognition": {"score": 7}, "flexibility": {"score": 6}, "aesthetic": {"score": 7}, "recovery": {"score": 6}, "help": {"score": 6} }, "overall": 67 }, "ui": { "overall": 74, "desktopScore": 73, "mobileScore": 75 } }`;
+      // SHORT prompt to minimize request size
+      visionContent.push({ 
+        type: 'text', 
+        text: `UI/UX analysis for ${nUrl}. JSON only: {"desktop":{"overall":75},"mobile":{"overall":75},"ux":{"heuristics":{"visibility":{"score":7},"match":{"score":7},"control":{"score":6},"consistency":{"score":7},"prevention":{"score":6},"recognition":{"score":7},"flexibility":{"score":6},"aesthetic":{"score":7},"recovery":{"score":6},"help":{"score":6}},"overall":67},"ui":{"overall":74,"desktopScore":73,"mobileScore":75}}` 
+      });
 
-      visionContent.push({ type: 'text', text: visionPrompt });
-
-      const uiuxResult = await callClaude([{ role: 'user', content: visionContent }], 'UI/UX Vision', 9000);
+      const uiuxResult = await callClaude([{ role: 'user', content: visionContent }], 'UI/UX Vision');
       const uiux = uiuxResult.success ? (parseJSON(uiuxResult.content) || {}) : {};
 
-      // Handle Vision API failure gracefully
       let uiScore = 70;
       let uxScore = 70;
       
@@ -368,20 +374,16 @@ export default function WMSI() {
         uxScore = uiux.ux?.overall || 70;
         log('success', 'ui', 'UI: ' + uiScore + ' | UX: ' + uxScore);
       } else {
-        log('warning', 'ui', 'Vision API timeout - using estimated scores');
+        log('warning', 'ui', 'Vision failed - using defaults');
       }
 
-      // PHASE 4: MARKETING (no images, fast)
+      // PHASE 4: MARKETING (text only)
       setStg('mkt');
       log('info', 'mkt', 'Analyzing Marketing...');
 
-      const seoContext = seo.overallSEO ? 'SEO: ' + seo.overallSEO.score + '/100' : '';
-      const uiContext = 'UI: ' + uiScore + ', UX: ' + uxScore;
+      const mktPrompt = `Marketing analysis for ${nUrl}. SEO:${seo.overallSEO?.score || 65}, UI:${uiScore}, UX:${uxScore}. JSON only: {"valueProp":{"score":3.2},"mix7p":{"overall":3.1},"customerJourney":{"overall":3.0,"attention":{"score":3.2},"interest":{"score":3.0},"desire":{"score":2.8},"action":{"score":3.0}},"trust":{"score":3.4},"brand":{"score":3.3,"maturity":"Developing"},"conversion":{"score":2.8},"overall":3.1,"maturity":"Developing","strengths":["strength1"],"gaps":["gap1"],"prioritizedActions":[{"priority":1,"action":"action","impact":"High","effort":"Medium"}]}`;
 
-      // OPTIMIZED: Shorter marketing prompt
-      const mktPrompt = `Analisis marketing website ${nUrl}. Data: ${seoContext}. ${uiContext}. Format JSON singkat: { "valueProp": {"score": 3.2, "reason": "singkat"}, "mix7p": {"overall": 3.1}, "customerJourney": {"overall": 3.0, "attention": {"score": 3.2}, "interest": {"score": 3.0}, "desire": {"score": 2.8}, "action": {"score": 3.0}}, "trust": {"score": 3.4}, "brand": {"score": 3.3, "maturity": "Developing"}, "conversion": {"score": 2.8}, "overall": 3.1, "maturity": "Developing", "strengths": ["kekuatan1"], "gaps": ["kelemahan1"], "prioritizedActions": [{"priority": 1, "action": "aksi", "impact": "High", "effort": "Medium"}] }`;
-
-      const mktResult = await callClaude([{ role: 'user', content: mktPrompt }], 'Marketing', 8000);
+      const mktResult = await callClaude([{ role: 'user', content: mktPrompt }], 'Marketing');
       const mkt = mktResult.success ? (parseJSON(mktResult.content) || { overall: 3.0 }) : { overall: 3.0 };
 
       if (mkt.overall) {
@@ -403,21 +405,21 @@ export default function WMSI() {
       const wqScore = (usability * 0.25) + (information * 0.25) + (service * 0.20) + (marketing * 0.30);
       const wqPct = (wqScore / 5) * 100;
 
-      const wqCalc = 'WebQual = (U:' + usability.toFixed(2) + ' x 0.25) + (I:' + information.toFixed(2) + ' x 0.25) + (S:' + service.toFixed(2) + ' x 0.20) + (M:' + marketing.toFixed(2) + ' x 0.30) = ' + wqScore.toFixed(2) + '/5 = ' + wqPct.toFixed(1) + '%';
+      const wqCalc = 'WQ = (U:' + usability.toFixed(2) + '*0.25) + (I:' + information.toFixed(2) + '*0.25) + (S:' + service.toFixed(2) + '*0.20) + (M:' + marketing.toFixed(2) + '*0.30) = ' + wqPct.toFixed(1) + '%';
 
       log('success', 'wq', 'WebQual 4.0: ' + wqPct.toFixed(1) + '%');
 
       // DONE
       setStg('done');
       const totalDuration = Date.now() - startTime;
-      log('success', 'done', 'Selesai dalam ' + (totalDuration / 1000).toFixed(1) + 's');
+      log('success', 'done', 'Completed in ' + (totalDuration / 1000).toFixed(1) + 's');
 
       const finalResults = {
         url: nUrl,
         domain: domain,
         duration: totalDuration,
         seo: { ...seo, score: seoScore },
-        ui: { ...uiux.ui, desktop: uiux.desktop, mobile: uiux.mobile, responsive: uiux.responsive, visualEvidence: uiux.visualEvidence, overall: uiScore },
+        ui: { ...uiux.ui, overall: uiScore },
         ux: uiux.ux || { overall: uxScore, heuristics: {} },
         mkt: mkt,
         wq: {
@@ -432,7 +434,7 @@ export default function WMSI() {
           mobileCount: mobileScreenshots.length,
           desktopPreviews: desktopPreviews,
           mobilePreviews: mobilePreviews,
-          totalImageSizeKB: totalSizeKB
+          totalBase64KB: totalBase64KB
         },
         methodologies: methodologies
       };
@@ -440,7 +442,7 @@ export default function WMSI() {
       setResults(finalResults);
 
       // Save to Supabase
-      log('info', 'db', 'Menyimpan hasil ke database...');
+      log('info', 'db', 'Saving to database...');
       try {
         const sessionData: AnalysisSession = {
           url: nUrl,
@@ -461,10 +463,10 @@ export default function WMSI() {
         };
 
         await saveAnalysisSession(sessionData);
-        log('success', 'db', 'Data tersimpan ke Supabase!');
+        log('success', 'db', 'Saved to Supabase!');
         setSavedToDb(true);
       } catch (dbError: any) {
-        log('error', 'db', 'Gagal menyimpan: ' + dbError.message);
+        log('error', 'db', 'Save failed: ' + dbError.message);
       }
 
     } catch (err: any) {
@@ -503,6 +505,11 @@ export default function WMSI() {
     );
   };
 
+  // Calculate current base64 size for display
+  const currentBase64KB = Math.round(
+    [...desktopScreenshots, ...mobileScreenshots].reduce((a, b) => a + b.base64.length, 0) / 1024
+  );
+
   return (
     <div style={{ minHeight: '100vh', background: 'linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%)', fontFamily: 'system-ui, -apple-system, sans-serif' }}>
       <div style={{ maxWidth: 1200, margin: '0 auto', padding: 20 }}>
@@ -521,11 +528,11 @@ export default function WMSI() {
         {!analyzing && !results && (
           <div style={{ background: '#fff', borderRadius: 16, padding: 24, boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)', marginBottom: 20 }}>
 
-            {/* Optimization Notice */}
-            <div style={{ background: '#eff6ff', borderRadius: 8, padding: 12, marginBottom: 20, border: '1px solid #bfdbfe', display: 'flex', alignItems: 'center', gap: 10 }}>
-              <Zap size={18} style={{ color: '#2563eb' }} />
-              <div style={{ fontSize: 12, color: '#1e40af' }}>
-                <strong>Optimized Mode:</strong> Gambar dikompresi otomatis untuk analisis cepat. Max {MAX_DESKTOP} Desktop + {MAX_MOBILE} Mobile.
+            {/* Free Tier Notice */}
+            <div style={{ background: '#fef3c7', borderRadius: 8, padding: 12, marginBottom: 20, border: '1px solid #fde68a', display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+              <AlertCircle size={18} style={{ color: '#d97706', flexShrink: 0, marginTop: 2 }} />
+              <div style={{ fontSize: 12, color: '#92400e' }}>
+                <strong>Vercel Free Mode:</strong> Gambar dikompresi maksimal (~80KB/gambar). Hanya 1 Desktop + 1 Mobile untuk kecepatan optimal.
               </div>
             </div>
 
@@ -546,14 +553,8 @@ export default function WMSI() {
             {/* Screenshot Upload */}
             <div style={{ marginBottom: 20 }}>
               <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 600, marginBottom: 12, fontSize: 14 }}>
-                <Camera size={18} style={{ color: '#8b5cf6' }} /> Upload Screenshot
+                <Camera size={18} style={{ color: '#8b5cf6' }} /> Upload Screenshot (Auto-Compressed)
               </label>
-
-              <div style={{ background: '#fefce8', borderRadius: 8, padding: 12, marginBottom: 16, border: '1px solid #fde047' }}>
-                <p style={{ fontSize: 12, color: '#854d0e', margin: 0 }}>
-                  <strong>Tips:</strong> Upload screenshot Desktop DAN Mobile. Gambar akan dikompresi otomatis (~150KB/gambar).
-                </p>
-              </div>
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
                 {/* Desktop */}
@@ -565,29 +566,28 @@ export default function WMSI() {
                       {desktopScreenshots.length}/{MAX_DESKTOP}
                     </span>
                   </div>
-                  <div
-                    onClick={() => desktopScreenshots.length < MAX_DESKTOP && desktopInputRef.current?.click()}
-                    style={{ border: '2px dashed #93c5fd', borderRadius: 8, padding: 20, textAlign: 'center', cursor: desktopScreenshots.length < MAX_DESKTOP ? 'pointer' : 'not-allowed', background: '#eff6ff', opacity: desktopScreenshots.length >= MAX_DESKTOP ? 0.5 : 1 }}
-                  >
-                    <input type="file" ref={desktopInputRef} onChange={handleDesktopUpload} accept="image/*" multiple style={{ display: 'none' }} />
-                    <Monitor size={32} style={{ color: '#3b82f6' }} />
-                    <p style={{ margin: '8px 0 0', fontWeight: 600, color: '#1e40af', fontSize: 13 }}>
-                      {desktopScreenshots.length >= MAX_DESKTOP ? 'Max reached' : 'Click to Upload'}
-                    </p>
-                  </div>
-                  {desktopPreviews.length > 0 && (
-                    <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
+                  {desktopScreenshots.length === 0 ? (
+                    <div
+                      onClick={() => desktopInputRef.current?.click()}
+                      style={{ border: '2px dashed #93c5fd', borderRadius: 8, padding: 20, textAlign: 'center', cursor: 'pointer', background: '#eff6ff' }}
+                    >
+                      <input type="file" ref={desktopInputRef} onChange={handleDesktopUpload} accept="image/*" style={{ display: 'none' }} />
+                      <Monitor size={32} style={{ color: '#3b82f6' }} />
+                      <p style={{ margin: '8px 0 0', fontWeight: 600, color: '#1e40af', fontSize: 13 }}>Click to Upload</p>
+                    </div>
+                  ) : (
+                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                       {desktopPreviews.map((p, i) => (
-                        <div key={i} style={{ position: 'relative', width: 80, height: 55, borderRadius: 6, overflow: 'hidden', border: '2px solid #93c5fd' }}>
+                        <div key={i} style={{ position: 'relative', width: '100%', height: 100, borderRadius: 8, overflow: 'hidden', border: '2px solid #10b981' }}>
                           <img src={p} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                           <button
                             onClick={() => removeDesktop(i)}
-                            style={{ position: 'absolute', top: 2, right: 2, width: 18, height: 18, borderRadius: 50, background: '#ef4444', border: 'none', cursor: 'pointer', color: '#fff', fontSize: 11, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                            style={{ position: 'absolute', top: 4, right: 4, width: 24, height: 24, borderRadius: 50, background: '#ef4444', border: 'none', cursor: 'pointer', color: '#fff', fontSize: 14, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
                           >
                             ×
                           </button>
-                          <div style={{ position: 'absolute', bottom: 2, left: 2, fontSize: 8, background: 'rgba(0,0,0,0.6)', color: '#fff', padding: '1px 4px', borderRadius: 3 }}>
-                            {Math.round(desktopScreenshots[i]?.size / 1024)}KB
+                          <div style={{ position: 'absolute', bottom: 4, left: 4, fontSize: 10, background: 'rgba(0,0,0,0.7)', color: '#fff', padding: '2px 6px', borderRadius: 4 }}>
+                            {Math.round(desktopScreenshots[i]?.base64.length / 1024)}KB base64
                           </div>
                         </div>
                       ))}
@@ -604,29 +604,28 @@ export default function WMSI() {
                       {mobileScreenshots.length}/{MAX_MOBILE}
                     </span>
                   </div>
-                  <div
-                    onClick={() => mobileScreenshots.length < MAX_MOBILE && mobileInputRef.current?.click()}
-                    style={{ border: '2px dashed #c4b5fd', borderRadius: 8, padding: 20, textAlign: 'center', cursor: mobileScreenshots.length < MAX_MOBILE ? 'pointer' : 'not-allowed', background: '#f5f3ff', opacity: mobileScreenshots.length >= MAX_MOBILE ? 0.5 : 1 }}
-                  >
-                    <input type="file" ref={mobileInputRef} onChange={handleMobileUpload} accept="image/*" multiple style={{ display: 'none' }} />
-                    <Smartphone size={32} style={{ color: '#8b5cf6' }} />
-                    <p style={{ margin: '8px 0 0', fontWeight: 600, color: '#5b21b6', fontSize: 13 }}>
-                      {mobileScreenshots.length >= MAX_MOBILE ? 'Max reached' : 'Click to Upload'}
-                    </p>
-                  </div>
-                  {mobilePreviews.length > 0 && (
-                    <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
+                  {mobileScreenshots.length === 0 ? (
+                    <div
+                      onClick={() => mobileInputRef.current?.click()}
+                      style={{ border: '2px dashed #c4b5fd', borderRadius: 8, padding: 20, textAlign: 'center', cursor: 'pointer', background: '#f5f3ff' }}
+                    >
+                      <input type="file" ref={mobileInputRef} onChange={handleMobileUpload} accept="image/*" style={{ display: 'none' }} />
+                      <Smartphone size={32} style={{ color: '#8b5cf6' }} />
+                      <p style={{ margin: '8px 0 0', fontWeight: 600, color: '#5b21b6', fontSize: 13 }}>Click to Upload</p>
+                    </div>
+                  ) : (
+                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                       {mobilePreviews.map((p, i) => (
-                        <div key={i} style={{ position: 'relative', width: 45, height: 80, borderRadius: 6, overflow: 'hidden', border: '2px solid #c4b5fd' }}>
+                        <div key={i} style={{ position: 'relative', width: '100%', height: 100, borderRadius: 8, overflow: 'hidden', border: '2px solid #10b981' }}>
                           <img src={p} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                           <button
                             onClick={() => removeMobile(i)}
-                            style={{ position: 'absolute', top: 2, right: 2, width: 16, height: 16, borderRadius: 50, background: '#ef4444', border: 'none', cursor: 'pointer', color: '#fff', fontSize: 9, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                            style={{ position: 'absolute', top: 4, right: 4, width: 24, height: 24, borderRadius: 50, background: '#ef4444', border: 'none', cursor: 'pointer', color: '#fff', fontSize: 14, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
                           >
                             ×
                           </button>
-                          <div style={{ position: 'absolute', bottom: 2, left: 2, fontSize: 7, background: 'rgba(0,0,0,0.6)', color: '#fff', padding: '1px 3px', borderRadius: 2 }}>
-                            {Math.round(mobileScreenshots[i]?.size / 1024)}KB
+                          <div style={{ position: 'absolute', bottom: 4, left: 4, fontSize: 10, background: 'rgba(0,0,0,0.7)', color: '#fff', padding: '2px 6px', borderRadius: 4 }}>
+                            {Math.round(mobileScreenshots[i]?.base64.length / 1024)}KB base64
                           </div>
                         </div>
                       ))}
@@ -639,33 +638,33 @@ export default function WMSI() {
             {/* Status */}
             <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
               <div style={{ flex: 1, padding: 10, background: desktopScreenshots.length > 0 ? '#dcfce7' : '#fef3c7', borderRadius: 8, textAlign: 'center', fontSize: 13, fontWeight: 500 }}>
-                {desktopScreenshots.length > 0 ? '✓ ' + desktopScreenshots.length + ' Desktop' : '⚠ Desktop required'}
+                {desktopScreenshots.length > 0 ? '✓ Desktop ready' : '⚠ Need Desktop'}
               </div>
               <div style={{ flex: 1, padding: 10, background: mobileScreenshots.length > 0 ? '#dcfce7' : '#fef3c7', borderRadius: 8, textAlign: 'center', fontSize: 13, fontWeight: 500 }}>
-                {mobileScreenshots.length > 0 ? '✓ ' + mobileScreenshots.length + ' Mobile' : '⚠ Mobile required'}
+                {mobileScreenshots.length > 0 ? '✓ Mobile ready' : '⚠ Need Mobile'}
               </div>
             </div>
 
-            {/* Total Size Indicator */}
+            {/* Size Indicator */}
             {(desktopScreenshots.length > 0 || mobileScreenshots.length > 0) && (
               <div style={{ 
                 padding: 10, 
-                background: [...desktopScreenshots, ...mobileScreenshots].reduce((a, b) => a + b.size, 0) / 1024 > 400 ? '#fef2f2' : '#f0fdf4', 
+                background: currentBase64KB > 250 ? '#fef2f2' : '#f0fdf4', 
                 borderRadius: 8, 
                 textAlign: 'center', 
                 fontSize: 12, 
                 fontWeight: 500,
                 marginBottom: 16,
-                color: [...desktopScreenshots, ...mobileScreenshots].reduce((a, b) => a + b.size, 0) / 1024 > 400 ? '#991b1b' : '#166534'
+                color: currentBase64KB > 250 ? '#991b1b' : '#166534'
               }}>
-                Total: {Math.round([...desktopScreenshots, ...mobileScreenshots].reduce((a, b) => a + b.size, 0) / 1024)}KB / 500KB max
+                Base64 Size: {currentBase64KB}KB / 300KB max {currentBase64KB > 250 && '⚠️ Near limit!'}
               </div>
             )}
 
             {/* Button */}
             <button
               onClick={analyze}
-              disabled={!url || desktopScreenshots.length === 0 || mobileScreenshots.length === 0}
+              disabled={!url || desktopScreenshots.length === 0 || mobileScreenshots.length === 0 || currentBase64KB > 300}
               style={{
                 width: '100%',
                 padding: 16,
@@ -673,9 +672,9 @@ export default function WMSI() {
                 fontWeight: 700,
                 borderRadius: 12,
                 border: 'none',
-                cursor: (url && desktopScreenshots.length > 0 && mobileScreenshots.length > 0) ? 'pointer' : 'not-allowed',
-                background: (url && desktopScreenshots.length > 0 && mobileScreenshots.length > 0) ? 'linear-gradient(135deg, #0ea5e9, #0284c7)' : '#e2e8f0',
-                color: (url && desktopScreenshots.length > 0 && mobileScreenshots.length > 0) ? '#fff' : '#94a3b8',
+                cursor: (url && desktopScreenshots.length > 0 && mobileScreenshots.length > 0 && currentBase64KB <= 300) ? 'pointer' : 'not-allowed',
+                background: (url && desktopScreenshots.length > 0 && mobileScreenshots.length > 0 && currentBase64KB <= 300) ? 'linear-gradient(135deg, #0ea5e9, #0284c7)' : '#e2e8f0',
+                color: (url && desktopScreenshots.length > 0 && mobileScreenshots.length > 0 && currentBase64KB <= 300) ? '#fff' : '#94a3b8',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
@@ -683,7 +682,7 @@ export default function WMSI() {
               }}
             >
               <Brain size={20} />
-              {(!url || desktopScreenshots.length === 0 || mobileScreenshots.length === 0) ? 'Lengkapi URL dan Screenshot' : 'Mulai Analisis'}
+              {currentBase64KB > 300 ? 'Images too large' : (!url || desktopScreenshots.length === 0 || mobileScreenshots.length === 0) ? 'Complete URL & Screenshots' : 'Start Analysis'}
             </button>
           </div>
         )}
@@ -700,10 +699,10 @@ export default function WMSI() {
               </div>
               <div style={{ flex: 1 }}>
                 <h3 style={{ fontWeight: 700, fontSize: 18, margin: 0, color: '#0f172a' }}>
-                  {stage ? stages.find(s => s.id === stage)?.name : 'Memproses...'}
+                  {stage ? stages.find(s => s.id === stage)?.name : 'Processing...'}
                 </h3>
                 <p style={{ color: '#64748b', fontSize: 13, margin: '4px 0 0' }}>
-                  Optimized for fast analysis
+                  Optimized for Vercel Free Tier
                 </p>
               </div>
             </div>
@@ -735,11 +734,10 @@ export default function WMSI() {
         {/* RESULTS */}
         {results && (
           <div>
-            {/* Saved to DB indicator */}
             {savedToDb && (
               <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 12, padding: 12, marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
                 <Database size={18} style={{ color: '#16a34a' }} />
-                <span style={{ fontSize: 13, color: '#166534', fontWeight: 500 }}>Data analisis tersimpan ke Supabase</span>
+                <span style={{ fontSize: 13, color: '#166534', fontWeight: 500 }}>Saved to Supabase</span>
               </div>
             )}
 
@@ -752,7 +750,7 @@ export default function WMSI() {
                     <h2 style={{ fontSize: 20, fontWeight: 800, margin: 0 }}>WebQual 4.0 Score</h2>
                   </div>
                   <p style={{ opacity: 0.9, fontSize: 14, margin: 0 }}>{results.url}</p>
-                  <p style={{ opacity: 0.7, fontSize: 12, margin: '4px 0 0' }}>Analyzed in {(results.duration / 1000).toFixed(1)}s | Images: {results.metadata.totalImageSizeKB}KB</p>
+                  <p style={{ opacity: 0.7, fontSize: 12, margin: '4px 0 0' }}>{(results.duration / 1000).toFixed(1)}s | {results.metadata.totalBase64KB}KB</p>
                 </div>
                 <div style={{ textAlign: 'center' }}>
                   <div style={{ fontSize: 52, fontWeight: 800, lineHeight: 1 }}>{results.wq.overall.pct.toFixed(0)}%</div>
@@ -761,26 +759,21 @@ export default function WMSI() {
               </div>
 
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginTop: 20 }}>
-                <div style={{ background: 'rgba(255,255,255,0.15)', borderRadius: 10, padding: 14, textAlign: 'center' }}>
-                  <MousePointer size={18} style={{ marginBottom: 4, opacity: 0.9 }} />
-                  <div style={{ fontSize: 22, fontWeight: 700 }}>{results.wq.usability.pct.toFixed(0)}%</div>
-                  <div style={{ fontSize: 11, opacity: 0.8 }}>Usability</div>
-                </div>
-                <div style={{ background: 'rgba(255,255,255,0.15)', borderRadius: 10, padding: 14, textAlign: 'center' }}>
-                  <FileText size={18} style={{ marginBottom: 4, opacity: 0.9 }} />
-                  <div style={{ fontSize: 22, fontWeight: 700 }}>{results.wq.information.pct.toFixed(0)}%</div>
-                  <div style={{ fontSize: 11, opacity: 0.8 }}>Information</div>
-                </div>
-                <div style={{ background: 'rgba(255,255,255,0.15)', borderRadius: 10, padding: 14, textAlign: 'center' }}>
-                  <Shield size={18} style={{ marginBottom: 4, opacity: 0.9 }} />
-                  <div style={{ fontSize: 22, fontWeight: 700 }}>{results.wq.service.pct.toFixed(0)}%</div>
-                  <div style={{ fontSize: 11, opacity: 0.8 }}>Service</div>
-                </div>
-                <div style={{ background: 'rgba(255,255,255,0.15)', borderRadius: 10, padding: 14, textAlign: 'center' }}>
-                  <Megaphone size={18} style={{ marginBottom: 4, opacity: 0.9 }} />
-                  <div style={{ fontSize: 22, fontWeight: 700 }}>{results.wq.marketing.pct.toFixed(0)}%</div>
-                  <div style={{ fontSize: 11, opacity: 0.8 }}>Marketing</div>
-                </div>
+                {[
+                  { k: 'usability', l: 'Usability', icon: MousePointer },
+                  { k: 'information', l: 'Information', icon: FileText },
+                  { k: 'service', l: 'Service', icon: Shield },
+                  { k: 'marketing', l: 'Marketing', icon: Megaphone }
+                ].map(d => {
+                  const Icon = d.icon;
+                  return (
+                    <div key={d.k} style={{ background: 'rgba(255,255,255,0.15)', borderRadius: 10, padding: 14, textAlign: 'center' }}>
+                      <Icon size={18} style={{ marginBottom: 4, opacity: 0.9 }} />
+                      <div style={{ fontSize: 22, fontWeight: 700 }}>{results.wq[d.k].pct.toFixed(0)}%</div>
+                      <div style={{ fontSize: 11, opacity: 0.8 }}>{d.l}</div>
+                    </div>
+                  );
+                })}
               </div>
             </div>
 
@@ -799,15 +792,8 @@ export default function WMSI() {
                     key={t.id}
                     onClick={() => setTab(t.id)}
                     style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 6,
-                      padding: '10px 16px',
-                      fontSize: 13,
-                      fontWeight: 600,
-                      border: 'none',
-                      borderRadius: 8,
-                      cursor: 'pointer',
+                      display: 'flex', alignItems: 'center', gap: 6, padding: '10px 16px',
+                      fontSize: 13, fontWeight: 600, border: 'none', borderRadius: 8, cursor: 'pointer',
                       background: tab === t.id ? '#0ea5e9' : '#fff',
                       color: tab === t.id ? '#fff' : '#64748b'
                     }}
@@ -819,186 +805,42 @@ export default function WMSI() {
             </div>
 
             {/* Tab Content */}
-            <div style={{ background: '#fff', borderRadius: 16, padding: 24, minHeight: 400 }}>
-
-              {/* Overview */}
+            <div style={{ background: '#fff', borderRadius: 16, padding: 24, minHeight: 300 }}>
               {tab === 'overview' && (
                 <div>
-                  <h3 style={{ fontSize: 18, fontWeight: 700, marginBottom: 16 }}>Ringkasan Analisis</h3>
-
-                  <div style={{ background: '#f8fafc', borderRadius: 12, padding: 16, marginBottom: 20 }}>
-                    <h4 style={{ fontSize: 14, fontWeight: 600, marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <Camera size={16} /> Screenshot yang Dianalisis
-                    </h4>
-                    <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap' }}>
-                      <div>
-                        <div style={{ fontSize: 12, fontWeight: 600, color: '#3b82f6', marginBottom: 8 }}>Desktop ({results.metadata.desktopCount})</div>
-                        <div style={{ display: 'flex', gap: 8 }}>
-                          {results.metadata.desktopPreviews.map((p: string, i: number) => (
-                            <img key={i} src={p} alt="" style={{ width: 120, height: 80, objectFit: 'cover', borderRadius: 8, border: '2px solid #93c5fd' }} />
-                          ))}
-                        </div>
-                      </div>
-                      <div>
-                        <div style={{ fontSize: 12, fontWeight: 600, color: '#8b5cf6', marginBottom: 8 }}>Mobile ({results.metadata.mobileCount})</div>
-                        <div style={{ display: 'flex', gap: 8 }}>
-                          {results.metadata.mobilePreviews.map((p: string, i: number) => (
-                            <img key={i} src={p} alt="" style={{ width: 50, height: 90, objectFit: 'cover', borderRadius: 8, border: '2px solid #c4b5fd' }} />
-                          ))}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
+                  <h3 style={{ fontSize: 18, fontWeight: 700, marginBottom: 16 }}>Analysis Summary</h3>
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
                     <div style={{ background: '#f8fafc', borderRadius: 12, padding: 16, borderLeft: '4px solid #10b981' }}>
-                      <div style={{ fontSize: 13, color: '#64748b', marginBottom: 4 }}>SEO Score</div>
+                      <div style={{ fontSize: 13, color: '#64748b', marginBottom: 4 }}>SEO</div>
                       <div style={{ fontSize: 28, fontWeight: 700, color: '#10b981' }}>{results.seo.score}</div>
                       <Bar v={results.seo.score} c="#10b981" h={4} />
                     </div>
                     <div style={{ background: '#f8fafc', borderRadius: 12, padding: 16, borderLeft: '4px solid #3b82f6' }}>
-                      <div style={{ fontSize: 13, color: '#64748b', marginBottom: 4 }}>UI Score</div>
-                      <div style={{ fontSize: 28, fontWeight: 700, color: '#3b82f6' }}>{results.ui.overall || 70}</div>
-                      <Bar v={results.ui.overall || 70} c="#3b82f6" h={4} />
+                      <div style={{ fontSize: 13, color: '#64748b', marginBottom: 4 }}>UI</div>
+                      <div style={{ fontSize: 28, fontWeight: 700, color: '#3b82f6' }}>{results.ui.overall}</div>
+                      <Bar v={results.ui.overall} c="#3b82f6" h={4} />
                     </div>
                     <div style={{ background: '#f8fafc', borderRadius: 12, padding: 16, borderLeft: '4px solid #f59e0b' }}>
-                      <div style={{ fontSize: 13, color: '#64748b', marginBottom: 4 }}>UX Score</div>
+                      <div style={{ fontSize: 13, color: '#64748b', marginBottom: 4 }}>UX</div>
                       <div style={{ fontSize: 28, fontWeight: 700, color: '#f59e0b' }}>{results.ux.overall}</div>
                       <Bar v={results.ux.overall} c="#f59e0b" h={4} />
                     </div>
                   </div>
-
-                  {results.mkt.strengths && results.mkt.gaps && (
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginTop: 20 }}>
-                      <div style={{ background: '#f0fdf4', borderRadius: 12, padding: 16, border: '1px solid #bbf7d0' }}>
-                        <h4 style={{ fontSize: 14, fontWeight: 700, color: '#166534', marginBottom: 10 }}>Kekuatan</h4>
-                        {results.mkt.strengths.slice(0, 4).map((s: string, i: number) => (
-                          <div key={i} style={{ fontSize: 12, color: '#166534', marginBottom: 6 }}>✓ {s}</div>
-                        ))}
-                      </div>
-                      <div style={{ background: '#fef2f2', borderRadius: 12, padding: 16, border: '1px solid #fecaca' }}>
-                        <h4 style={{ fontSize: 14, fontWeight: 700, color: '#991b1b', marginBottom: 10 }}>Area Perbaikan</h4>
-                        {results.mkt.gaps.slice(0, 4).map((g: string, i: number) => (
-                          <div key={i} style={{ fontSize: 12, color: '#991b1b', marginBottom: 6 }}>! {g}</div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
                 </div>
               )}
 
-              {/* SEO Tab */}
               {tab === 'seo' && (
                 <div>
                   <div style={{ background: 'linear-gradient(135deg, #10b981, #059669)', borderRadius: 12, padding: 20, color: '#fff', marginBottom: 20 }}>
                     <div style={{ fontSize: 12, opacity: 0.8 }}>SEO Score</div>
                     <div style={{ fontSize: 36, fontWeight: 800 }}>{results.seo.score}/100</div>
-                    <div style={{ fontSize: 14 }}>Visibility: {results.seo.overallSEO?.visibility || 'N/A'}</div>
                   </div>
-
-                  {results.seo.keywords && results.seo.keywords.length > 0 && (
-                    <div style={{ marginBottom: 20 }}>
-                      <h4 style={{ fontSize: 14, fontWeight: 700, marginBottom: 12 }}>Keyword Rankings</h4>
-                      <div style={{ background: '#f8fafc', borderRadius: 12, overflow: 'hidden' }}>
-                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-                          <thead>
-                            <tr style={{ background: '#e2e8f0' }}>
-                              <th style={{ padding: 12, textAlign: 'left' }}>Keyword</th>
-                              <th style={{ padding: 12, textAlign: 'center' }}>Rank</th>
-                              <th style={{ padding: 12, textAlign: 'center' }}>Volume</th>
-                              <th style={{ padding: 12, textAlign: 'center' }}>Difficulty</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {results.seo.keywords.map((kw: any, i: number) => (
-                              <tr key={i} style={{ borderBottom: '1px solid #e2e8f0' }}>
-                                <td style={{ padding: 12 }}>{kw.keyword}</td>
-                                <td style={{ padding: 12, textAlign: 'center' }}>#{kw.estimatedRank}</td>
-                                <td style={{ padding: 12, textAlign: 'center' }}>{kw.searchVolume?.toLocaleString()}</td>
-                                <td style={{ padding: 12, textAlign: 'center' }}>{kw.difficulty}</td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* UI/UX Tab */}
-              {tab === 'ui' && (
-                <div>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 20 }}>
-                    <div style={{ background: '#eff6ff', borderRadius: 12, padding: 20 }}>
-                      <h4 style={{ fontSize: 16, fontWeight: 700, color: '#1e40af', marginBottom: 16 }}>Desktop UI: {results.ui.desktopScore || results.ui.overall}</h4>
-                      {results.ui.desktop && (
-                        <p style={{ fontSize: 12, color: '#3b82f6' }}>{results.ui.desktop.hierarchy?.reason || 'Visual hierarchy analysis'}</p>
-                      )}
-                    </div>
-                    <div style={{ background: '#f5f3ff', borderRadius: 12, padding: 20 }}>
-                      <h4 style={{ fontSize: 16, fontWeight: 700, color: '#5b21b6', marginBottom: 16 }}>Mobile UI: {results.ui.mobileScore || results.ui.overall}</h4>
-                      {results.ui.mobile && (
-                        <p style={{ fontSize: 12, color: '#8b5cf6' }}>{results.ui.mobile.hierarchy?.reason || 'Mobile hierarchy analysis'}</p>
-                      )}
-                    </div>
-                  </div>
-
-                  {results.ux.heuristics && Object.keys(results.ux.heuristics).length > 0 && (
-                    <div style={{ background: '#fffbeb', borderRadius: 12, padding: 16 }}>
-                      <h4 style={{ fontSize: 14, fontWeight: 700, color: '#92400e', marginBottom: 12 }}>Nielsen Heuristics (UX: {results.ux.overall}/100)</h4>
-                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 8 }}>
-                        {Object.entries(results.ux.heuristics).map(([k, v]: [string, any]) => (
-                          <div key={k} style={{ background: '#fff', borderRadius: 8, padding: 10, textAlign: 'center' }}>
-                            <div style={{ fontSize: 18, fontWeight: 700, color: clr(v.score || 0, 10) }}>{v.score || 0}</div>
-                            <div style={{ fontSize: 9, color: '#64748b', textTransform: 'capitalize' }}>{k}</div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* Marketing Tab */}
-              {tab === 'mkt' && (
-                <div>
-                  <div style={{ background: 'linear-gradient(135deg, #ec4899, #db2777)', borderRadius: 12, padding: 20, color: '#fff', marginBottom: 20 }}>
-                    <div style={{ fontSize: 12, opacity: 0.8 }}>Marketing Effectiveness</div>
-                    <div style={{ fontSize: 40, fontWeight: 800 }}>{(results.mkt.overall * 20).toFixed(0)}%</div>
-                    <div style={{ fontSize: 14 }}>Maturity: {results.mkt.maturity || 'Developing'}</div>
-                  </div>
-
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginBottom: 20 }}>
+                  {results.seo.keywords && (
                     <div style={{ background: '#f8fafc', borderRadius: 12, padding: 16 }}>
-                      <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>Value Proposition</div>
-                      <div style={{ fontSize: 24, fontWeight: 700, color: '#8b5cf6' }}>{results.mkt.valueProp?.score?.toFixed(1) || 0}/5</div>
-                      <Bar v={results.mkt.valueProp?.score || 0} m={5} c="#8b5cf6" h={4} />
-                    </div>
-                    <div style={{ background: '#f8fafc', borderRadius: 12, padding: 16 }}>
-                      <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>Marketing Mix 7Ps</div>
-                      <div style={{ fontSize: 24, fontWeight: 700, color: '#0ea5e9' }}>{results.mkt.mix7p?.overall?.toFixed(1) || 0}/5</div>
-                      <Bar v={results.mkt.mix7p?.overall || 0} m={5} c="#0ea5e9" h={4} />
-                    </div>
-                    <div style={{ background: '#f8fafc', borderRadius: 12, padding: 16 }}>
-                      <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>Customer Journey</div>
-                      <div style={{ fontSize: 24, fontWeight: 700, color: '#10b981' }}>{results.mkt.customerJourney?.overall?.toFixed(1) || 0}/5</div>
-                      <Bar v={results.mkt.customerJourney?.overall || 0} m={5} c="#10b981" h={4} />
-                    </div>
-                  </div>
-
-                  {results.mkt.prioritizedActions && results.mkt.prioritizedActions.length > 0 && (
-                    <div style={{ background: '#fffbeb', borderRadius: 12, padding: 16, border: '1px solid #fde68a' }}>
-                      <h4 style={{ fontSize: 14, fontWeight: 700, color: '#92400e', marginBottom: 12 }}>Prioritized Actions</h4>
-                      {results.mkt.prioritizedActions.map((a: any, i: number) => (
-                        <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: 12, background: '#fff', borderRadius: 8, marginBottom: 8 }}>
-                          <span style={{ width: 28, height: 28, background: a.priority === 1 ? '#ef4444' : a.priority === 2 ? '#f59e0b' : '#10b981', borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: 12, fontWeight: 700 }}>
-                            P{a.priority}
-                          </span>
-                          <div style={{ flex: 1 }}>
-                            <div style={{ fontSize: 13, fontWeight: 600, color: '#78350f' }}>{a.action}</div>
-                            <div style={{ fontSize: 11, color: '#92400e' }}>Impact: {a.impact} | Effort: {a.effort}</div>
-                          </div>
+                      <h4 style={{ marginBottom: 12 }}>Keywords</h4>
+                      {results.seo.keywords.map((k: any, i: number) => (
+                        <div key={i} style={{ padding: 8, borderBottom: '1px solid #e5e7eb' }}>
+                          <strong>{k.keyword}</strong> - Rank #{k.estimatedRank}
                         </div>
                       ))}
                     </div>
@@ -1006,51 +848,42 @@ export default function WMSI() {
                 </div>
               )}
 
-              {/* WebQual Tab */}
-              {tab === 'wq' && (
+              {tab === 'ui' && (
                 <div>
-                  <div style={{ background: '#f0f9ff', borderRadius: 12, padding: 16, marginBottom: 20, border: '1px solid #bae6fd' }}>
-                    <h3 style={{ fontSize: 16, fontWeight: 700, color: '#0369a1', marginBottom: 8 }}>WebQual 4.0 Framework</h3>
-                    <p style={{ fontSize: 13, color: '#0284c7', marginBottom: 12 }}>Barnes dan Vidgen (2002), diadaptasi dengan dimensi Marketing</p>
-                    <div style={{ background: '#fff', padding: 12, borderRadius: 8 }}>
-                      <code style={{ fontSize: 11, color: '#0369a1', fontFamily: 'monospace' }}>{results.wq.overall.calculation}</code>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+                    <div style={{ background: '#eff6ff', borderRadius: 12, padding: 20 }}>
+                      <h4 style={{ color: '#1e40af' }}>UI Score: {results.ui.overall}</h4>
+                    </div>
+                    <div style={{ background: '#fffbeb', borderRadius: 12, padding: 20 }}>
+                      <h4 style={{ color: '#92400e' }}>UX Score: {results.ux.overall}</h4>
                     </div>
                   </div>
+                </div>
+              )}
 
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 16 }}>
-                    {[
-                      { k: 'usability', t: 'Usability', c: '#8b5cf6', w: '25%' },
-                      { k: 'information', t: 'Information', c: '#0ea5e9', w: '25%' },
-                      { k: 'service', t: 'Service', c: '#10b981', w: '20%' },
-                      { k: 'marketing', t: 'Marketing', c: '#ec4899', w: '30%' }
-                    ].map(d => (
-                      <div key={d.k} style={{ background: '#fff', borderRadius: 12, padding: 16, border: '1px solid #e2e8f0' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-                          <div>
-                            <div style={{ fontWeight: 700, fontSize: 15, color: '#1e293b' }}>{d.t}</div>
-                            <div style={{ fontSize: 11, color: '#64748b' }}>Weight: {d.w}</div>
-                          </div>
-                          <div style={{ textAlign: 'right' }}>
-                            <div style={{ fontSize: 28, fontWeight: 800, color: d.c }}>{results.wq[d.k].pct.toFixed(0)}%</div>
-                            <div style={{ fontSize: 11, color: '#94a3b8' }}>{results.wq[d.k].score.toFixed(2)}/5</div>
-                          </div>
-                        </div>
-                        <Bar v={results.wq[d.k].pct} c={d.c} h={8} />
-                        <p style={{ fontSize: 12, color: '#64748b', marginTop: 10 }}>Source: {results.wq[d.k].source}</p>
-                      </div>
-                    ))}
+              {tab === 'mkt' && (
+                <div>
+                  <div style={{ background: 'linear-gradient(135deg, #ec4899, #db2777)', borderRadius: 12, padding: 20, color: '#fff', marginBottom: 20 }}>
+                    <div style={{ fontSize: 12, opacity: 0.8 }}>Marketing</div>
+                    <div style={{ fontSize: 36, fontWeight: 800 }}>{(results.mkt.overall * 20).toFixed(0)}%</div>
                   </div>
+                </div>
+              )}
 
-                  <div style={{ marginTop: 20, background: 'linear-gradient(135deg, #0ea5e9, #0284c7)', borderRadius: 12, padding: 24, color: '#fff', textAlign: 'center' }}>
-                    <div style={{ fontSize: 14, opacity: 0.9 }}>WebQual 4.0 Final Score</div>
-                    <div style={{ fontSize: 56, fontWeight: 800, lineHeight: 1.1 }}>{results.wq.overall.pct.toFixed(1)}%</div>
-                    <div style={{ fontSize: 16, marginTop: 4 }}>{lbl(results.wq.overall.pct, 100)}</div>
+              {tab === 'wq' && (
+                <div>
+                  <div style={{ background: '#f0f9ff', borderRadius: 12, padding: 16, marginBottom: 20 }}>
+                    <h3 style={{ color: '#0369a1' }}>WebQual 4.0 Formula</h3>
+                    <code style={{ fontSize: 11 }}>{results.wq.overall.calculation}</code>
+                  </div>
+                  <div style={{ background: 'linear-gradient(135deg, #0ea5e9, #0284c7)', borderRadius: 12, padding: 24, color: '#fff', textAlign: 'center' }}>
+                    <div style={{ fontSize: 14, opacity: 0.9 }}>Final Score</div>
+                    <div style={{ fontSize: 56, fontWeight: 800 }}>{results.wq.overall.pct.toFixed(1)}%</div>
                   </div>
                 </div>
               )}
             </div>
 
-            {/* New Analysis */}
             <button
               onClick={() => {
                 setResults(null);
@@ -1065,7 +898,7 @@ export default function WMSI() {
               }}
               style={{ width: '100%', marginTop: 20, padding: 14, fontSize: 14, fontWeight: 600, background: '#f1f5f9', border: 'none', borderRadius: 10, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
             >
-              <RefreshCw size={16} /> Analisis Website Lain
+              <RefreshCw size={16} /> New Analysis
             </button>
           </div>
         )}
@@ -1084,7 +917,7 @@ export default function WMSI() {
               onClick={() => { setError(null); setAnalyzing(false); }}
               style={{ marginTop: 12, padding: '8px 16px', fontSize: 13, fontWeight: 600, background: '#fff', border: '1px solid #fecaca', borderRadius: 6, cursor: 'pointer', color: '#991b1b' }}
             >
-              Coba Lagi
+              Try Again
             </button>
           </div>
         )}
