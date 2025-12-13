@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+// Tambah config untuk timeout lebih lama
+export const maxDuration = 60; // 60 detik (Vercel Pro) atau 10 detik (Free)
+
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
@@ -28,16 +31,28 @@ export async function POST(request: NextRequest) {
       }),
     });
 
+    // Ambil response sebagai text dulu
+    const responseText = await response.text();
+
     if (!response.ok) {
-      const errorText = await response.text();
-      console.error('Claude API Error:', response.status, errorText);
+      console.error('Claude API Error:', response.status, responseText);
       return NextResponse.json(
-        { error: `Claude API Error: ${response.status}` },
+        { error: `Claude API Error: ${response.status} - ${responseText.substring(0, 200)}` },
         { status: response.status }
       );
     }
 
-    const data = await response.json();
+    // Parse JSON dengan error handling
+    let data;
+    try {
+      data = JSON.parse(responseText);
+    } catch (parseError) {
+      console.error('JSON Parse Error:', responseText.substring(0, 500));
+      return NextResponse.json(
+        { error: `Invalid JSON response: ${responseText.substring(0, 100)}` },
+        { status: 500 }
+      );
+    }
     
     return NextResponse.json({
       success: true,
@@ -45,10 +60,10 @@ export async function POST(request: NextRequest) {
       usage: data.usage,
     });
 
-  } catch (error) {
+  } catch (error: any) {
     console.error('API Route Error:', error);
     return NextResponse.json(
-      { error: 'Internal server error' },
+      { error: error.message || 'Internal server error' },
       { status: 500 }
     );
   }
