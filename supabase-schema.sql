@@ -1,8 +1,3 @@
--- =============================================
--- WMSI Database Schema for Supabase
--- Run this in Supabase SQL Editor
--- =============================================
-
 -- Create the main analysis_sessions table
 CREATE TABLE IF NOT EXISTS analysis_sessions (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
@@ -32,42 +27,34 @@ CREATE TABLE IF NOT EXISTS analysis_sessions (
   
   -- Client info
   user_agent TEXT,
-  ip_address TEXT
+  ip_address TEXT,
+  
+  -- AUTH CONNECTION (New Feature)
+  user_id UUID REFERENCES auth.users(id)
 );
 
--- Create indexes for faster queries
+-- Create indexes
 CREATE INDEX IF NOT EXISTS idx_analysis_sessions_domain ON analysis_sessions(domain);
-CREATE INDEX IF NOT EXISTS idx_analysis_sessions_created_at ON analysis_sessions(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_analysis_sessions_user_id ON analysis_sessions(user_id);
 CREATE INDEX IF NOT EXISTS idx_analysis_sessions_webqual_score ON analysis_sessions(webqual_score DESC);
 
--- Enable Row Level Security (optional - for public access)
+-- Security Policies (RLS)
 ALTER TABLE analysis_sessions ENABLE ROW LEVEL SECURITY;
 
--- Create policy to allow all operations (for simple setup)
--- For production, you may want to restrict this
-CREATE POLICY "Allow all operations" ON analysis_sessions
-  FOR ALL
-  USING (true)
-  WITH CHECK (true);
+-- 1. Insert: Boleh insert jika anonim atau user login dengan ID sendiri
+CREATE POLICY "Enable insert for everyone" ON analysis_sessions FOR INSERT 
+WITH CHECK (
+  (auth.role() = 'anon') OR 
+  (auth.uid() = user_id)
+);
 
--- Grant access to anonymous users (for public API)
-GRANT ALL ON analysis_sessions TO anon;
-GRANT ALL ON analysis_sessions TO authenticated;
+-- 2. Select: User hanya bisa lihat datanya sendiri (History Pribadi)
+--    ATAU sistem bisa lihat data anonim (untuk AI Learning nanti)
+CREATE POLICY "Enable select for owners" ON analysis_sessions FOR SELECT 
+USING (
+  (auth.uid() = user_id) 
+);
 
--- Create a view for statistics
-CREATE OR REPLACE VIEW analysis_statistics AS
-SELECT 
-  COUNT(*) as total_analyses,
-  COUNT(DISTINCT domain) as unique_domains,
-  AVG(webqual_score) as avg_webqual_score,
-  AVG(seo_score) as avg_seo_score,
-  AVG(ui_score) as avg_ui_score,
-  AVG(ux_score) as avg_ux_score,
-  AVG(marketing_score) as avg_marketing_score,
-  MIN(created_at) as first_analysis,
-  MAX(created_at) as last_analysis
-FROM analysis_sessions;
-
--- Grant access to the view
-GRANT SELECT ON analysis_statistics TO anon;
-GRANT SELECT ON analysis_statistics TO authenticated;
+-- 3. Update: User bisa update (misal untuk detach saat hapus akun)
+CREATE POLICY "Enable update for owners" ON analysis_sessions FOR UPDATE
+USING (auth.uid() = user_id);

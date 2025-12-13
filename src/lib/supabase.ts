@@ -25,10 +25,10 @@ export interface AnalysisSession {
   webqual_data: object;
   user_agent?: string;
   ip_address?: string;
-  user_id?: string | null;
+  user_id?: string | null; // Kolom penting untuk Auth & Learning
 }
 
-// Save analysis session to database
+// 1. Save analysis session
 export async function saveAnalysisSession(session: AnalysisSession) {
   const { data, error } = await supabase
     .from('analysis_sessions')
@@ -40,11 +40,10 @@ export async function saveAnalysisSession(session: AnalysisSession) {
     console.error('Error saving session:', error);
     throw error;
   }
-
   return data;
 }
 
-// Get analysis sessions by User ID (History)
+// 2. Get User History (Untuk Sidebar)
 export async function getUserHistory(userId: string) {
   const { data, error } = await supabase
     .from('analysis_sessions')
@@ -56,14 +55,12 @@ export async function getUserHistory(userId: string) {
     console.error('Error fetching history:', error);
     throw error;
   }
-
   return data;
 }
 
-// === NEW: Transfer Data to System (Anonymize) ===
-// Ini dijalankan saat user "Hapus Akun". Data tetap ada, tapi user_id jadi NULL.
+// 3. Detach User History (Untuk Hapus Akun -> Jadi Data Training)
 export async function detachUserHistory(userId: string) {
-  // Update semua history user ini menjadi NULL (milik sistem/anonymous)
+  // Update user_id menjadi NULL agar data menjadi anonim milik sistem
   const { error } = await supabase
     .from('analysis_sessions')
     .update({ user_id: null }) 
@@ -74,4 +71,19 @@ export async function detachUserHistory(userId: string) {
     throw error;
   }
   return true;
+}
+
+// 4. Get Analysis Session by ID (Optional utility)
+export async function getAnalysisSessionById(id: string) {
+  const { data, error } = await supabase
+    .from('analysis_sessions')
+    .select('*')
+    .eq('id', id)
+    .single();
+
+  if (error) {
+    console.error('Error fetching session:', error);
+    throw error;
+  }
+  return data;
 }
