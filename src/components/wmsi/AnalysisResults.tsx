@@ -258,22 +258,41 @@ export default function AnalysisResults({ results, tab, setTab, reset, savedToDb
               
               {seoKeywords.length > 0 && seoKeywords[0].keyword !== 'No keywords generated' ? (
                 <>
+                  {seo.keyword_analysis?.text_extraction_summary && (
+                    <div style={{ marginBottom: 16, padding: 12, background: '#fffbeb', borderRadius: 8, fontSize: 12, color: '#92400e', border: '1px solid #fcd34d' }}>
+                      <strong>📝 Content Extracted from Screenshots:</strong>
+                      <p style={{ margin: '4px 0 0 0', fontStyle: 'italic' }}>{seo.keyword_analysis.text_extraction_summary}</p>
+                    </div>
+                  )}
+                  
                   <div style={{ overflowX: 'auto', marginBottom: 20 }}>
                     <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
                       <thead>
                         <tr style={{ background: '#f0fdf4', borderBottom: '2px solid #bbf7d0' }}>
                           <th style={{ padding: 10, textAlign: 'left' }}>Keyword Generated</th>
+                          <th style={{ padding: 10, textAlign: 'center' }}>Type</th>
                           <th style={{ padding: 10, textAlign: 'center' }}>Search Vol</th>
                           <th style={{ padding: 10, textAlign: 'center' }}>Est. Rank</th>
-                          <th style={{ padding: 10, textAlign: 'center' }}>Intent</th>
-                          {seoKeywords[0]?.competition && <th style={{ padding: 10, textAlign: 'center' }}>Competition</th>}
+                          <th style={{ padding: 10, textAlign: 'left' }}>Relevance Reason</th>
                         </tr>
                       </thead>
                       <tbody>
                         {seoKeywords.map((k: any, i: number) => (
                           <tr key={i} style={{ borderBottom: '1px solid #e2e8f0' }}>
                             <td style={{ padding: 10, fontWeight: 600, color: '#166534' }}>{k.keyword}</td>
-                            <td style={{ padding: 10, textAlign: 'center' }}>{k.search_volume}</td>
+                            <td style={{ padding: 10, textAlign: 'center' }}>
+                              <span style={{ 
+                                background: '#f0fdf4', 
+                                color: '#166534', 
+                                padding: '2px 6px', 
+                                borderRadius: 4, 
+                                fontSize: 10,
+                                fontWeight: 600
+                              }}>
+                                {k.keyword_type || k.intent}
+                              </span>
+                            </td>
+                            <td style={{ padding: 10, textAlign: 'center', fontSize: 12 }}>{k.search_volume}</td>
                             <td style={{ padding: 10, textAlign: 'center' }}>
                               <span style={{ 
                                 background: k.google_rank_est <= 10 ? '#10b981' : k.google_rank_est <= 20 ? '#fbbf24' : '#ef4444', 
@@ -286,8 +305,9 @@ export default function AnalysisResults({ results, tab, setTab, reset, savedToDb
                                 #{k.google_rank_est}
                               </span>
                             </td>
-                            <td style={{ padding: 10, textAlign: 'center', fontSize: 11, color: '#64748b' }}>{k.intent}</td>
-                            {k.competition && <td style={{ padding: 10, textAlign: 'center', fontSize: 11 }}>{k.competition}</td>}
+                            <td style={{ padding: 10, fontSize: 11, color: '#64748b', fontStyle: 'italic' }}>
+                              {k.relevance_reason || k.intent}
+                            </td>
                           </tr>
                         ))}
                       </tbody>
@@ -296,6 +316,12 @@ export default function AnalysisResults({ results, tab, setTab, reset, savedToDb
                   <InfoCard title="Ranking Analysis" color="#10b981" icon={TrendingUp}>
                     {seo.keyword_analysis?.ranking_analysis || "Keyword analysis based on domain authority and search patterns."}
                   </InfoCard>
+                  
+                  {seo.keyword_analysis?.methodology && (
+                    <div style={{ marginTop: 12, padding: 12, background: '#f0f9ff', borderRadius: 8, fontSize: 11, color: '#0369a1', border: '1px solid #bae6fd' }}>
+                      <strong>Analysis Methodology:</strong> {seo.keyword_analysis.methodology}
+                    </div>
+                  )}
                 </>
               ) : (
                 <div style={{ padding: 40, textAlign: 'center', color: '#64748b' }}>
@@ -503,28 +529,35 @@ export default function AnalysisResults({ results, tab, setTab, reset, savedToDb
             {seo.keyword_analysis?.ranking_analysis || 'Keyword analysis based on domain authority and search patterns.'}
           </p>
           {seoKeywords.length > 0 && seoKeywords[0].keyword !== 'No keywords generated' ? (
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 10 }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 9 }}>
               <thead>
                 <tr style={{ background: '#eee' }}>
-                  <th style={{padding: 5, textAlign:'left', border: '1px solid #ddd'}}>Keyword</th>
-                  <th style={{padding: 5, textAlign:'center', border: '1px solid #ddd'}}>Volume</th>
-                  <th style={{padding: 5, textAlign:'center', border: '1px solid #ddd'}}>Rank</th>
-                  <th style={{padding: 5, textAlign:'center', border: '1px solid #ddd'}}>Intent</th>
+                  <th style={{padding: 4, textAlign:'left', border: '1px solid #ddd'}}>Keyword</th>
+                  <th style={{padding: 4, textAlign:'center', border: '1px solid #ddd'}}>Type</th>
+                  <th style={{padding: 4, textAlign:'center', border: '1px solid #ddd'}}>Vol</th>
+                  <th style={{padding: 4, textAlign:'center', border: '1px solid #ddd'}}>Rank</th>
+                  <th style={{padding: 4, textAlign:'left', border: '1px solid #ddd', fontSize: 8}}>Relevance</th>
                 </tr>
               </thead>
               <tbody>
                 {seoKeywords.slice(0, 5).map((k: any, i: number) => (
                   <tr key={i} style={{ borderBottom: '1px solid #eee' }}>
-                    <td style={{padding: 5, border: '1px solid #ddd'}}>{k.keyword}</td>
-                    <td style={{padding: 5, textAlign:'center', border: '1px solid #ddd'}}>{k.search_volume}</td>
-                    <td style={{padding: 5, textAlign:'center', border: '1px solid #ddd'}}>#{k.google_rank_est}</td>
-                    <td style={{padding: 5, textAlign:'center', border: '1px solid #ddd', fontSize: 9}}>{k.intent}</td>
+                    <td style={{padding: 4, border: '1px solid #ddd', fontWeight: 600}}>{k.keyword}</td>
+                    <td style={{padding: 4, textAlign:'center', border: '1px solid #ddd', fontSize: 8}}>{k.keyword_type || k.intent}</td>
+                    <td style={{padding: 4, textAlign:'center', border: '1px solid #ddd'}}>{k.search_volume}</td>
+                    <td style={{padding: 4, textAlign:'center', border: '1px solid #ddd'}}>#{k.google_rank_est}</td>
+                    <td style={{padding: 4, border: '1px solid #ddd', fontSize: 7, color: '#666'}}>{k.relevance_reason || '-'}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
           ) : (
             <p style={{ fontSize: 10, color: '#666', fontStyle: 'italic' }}>No keyword data available</p>
+          )}
+          {seo.keyword_analysis?.methodology && (
+            <p style={{ fontSize: 8, color: '#666', marginTop: 8, fontStyle: 'italic' }}>
+              Methodology: {seo.keyword_analysis.methodology}
+            </p>
           )}
         </div>
 

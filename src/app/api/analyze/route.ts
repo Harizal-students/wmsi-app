@@ -47,47 +47,64 @@ function enforceCompleteData(data: any, domain: string): any {
   
   const keywords = safeData.seo.keyword_analysis.generated_keywords;
   if (!Array.isArray(keywords) || keywords.length < 5) {
-    console.log('[ENFORCER] Generating SEO keywords from domain:', domainName);
+    console.log('[ENFORCER] AI did not generate keywords, creating minimal fallback for:', domainName);
+    
+    // MINIMAL FALLBACK - Only when AI completely fails
+    // Keep it generic and honest about limitations
     safeData.seo.keyword_analysis.generated_keywords = [
       { 
-        keyword: `${domainName} official`, 
-        search_volume: "High", 
-        google_rank_est: 1, 
+        keyword: `${domainName}`, 
+        search_volume: "Medium", 
+        google_rank_est: 1,
         intent: "Navigational",
-        competition: "Low"
+        competition: "Low",
+        relevance_reason: "Brand name - exact match domain search",
+        keyword_type: "Brand"
+      },
+      { 
+        keyword: `${domainName} website`, 
+        search_volume: "Low", 
+        google_rank_est: 2,
+        intent: "Navigational",
+        competition: "Low",
+        relevance_reason: "Brand + site type - common navigational search",
+        keyword_type: "Brand"
+      },
+      { 
+        keyword: `situs ${domainName}`, 
+        search_volume: "Low", 
+        google_rank_est: 3,
+        intent: "Navigational",
+        competition: "Low",
+        relevance_reason: "Indonesian variant of brand search",
+        keyword_type: "Brand"
+      },
+      { 
+        keyword: `tentang ${domainName}`, 
+        search_volume: "Low", 
+        google_rank_est: 8,
+        intent: "Informational",
+        competition: "Low",
+        relevance_reason: "Information-seeking query about brand",
+        keyword_type: "Informational"
       },
       { 
         keyword: `${domainName} indonesia`, 
-        search_volume: "High", 
-        google_rank_est: 3, 
-        intent: "Informational",
-        competition: "Medium"
-      },
-      { 
-        keyword: `layanan ${domainName}`, 
-        search_volume: "Medium", 
-        google_rank_est: 5, 
-        intent: "Informational",
-        competition: "Medium"
-      },
-      { 
-        keyword: `portal ${domainName}`, 
-        search_volume: "Medium", 
-        google_rank_est: 8, 
-        intent: "Navigational",
-        competition: "Low"
-      },
-      { 
-        keyword: `info ${domainName} terbaru`, 
         search_volume: "Low", 
-        google_rank_est: 12, 
-        intent: "Transactional",
-        competition: "Low"
+        google_rank_est: 5,
+        intent: "Navigational",
+        competition: "Low",
+        relevance_reason: "Localized brand search",
+        keyword_type: "Brand"
       }
     ];
     
+    safeData.seo.keyword_analysis.methodology = "Fallback: AI analysis incomplete. Generated basic brand-focused keywords only. For accurate industry-specific keywords, AI vision analysis is required to read actual site content.";
+    
+    safeData.seo.keyword_analysis.text_extraction_summary = "Unable to extract text from screenshots. Fallback keywords are generic brand searches only.";
+    
     safeData.seo.keyword_analysis.ranking_analysis = 
-      `Domain pemerintah/resmi seperti ${domainFull} umumnya memiliki otoritas tinggi di Google untuk keyword navigasional branded. Estimasi ranking untuk keyword "${domainName} official" berada di posisi 1-3 karena domain authority dan exact match. Untuk keyword informasional, persaingan lebih tinggi namun masih berada di halaman 1 Google (posisi 3-10).`;
+      `Limited analysis available. AI could not read website content from provided screenshots. Generated keywords are basic brand searches for "${domainName}" which may rank well for exact-match queries due to domain authority. However, without content analysis, industry-specific, product-focused, and intent-driven keywords cannot be generated. Recommend: 1) Verify screenshot quality and clarity, 2) Ensure text is visible in images, 3) Re-run analysis with clearer screenshots for accurate keyword strategy. Current fallback keywords focus solely on navigational brand searches and will not capture broader market opportunities.`;
   }
 
   // Enforce overall SEO score
@@ -356,14 +373,70 @@ export async function POST(request: NextRequest) {
     const enhancedPrompt = `
 ${learningContext}
 
-*** ROLE: SENIOR DIGITAL AUDIT EXPERT ***
-You are an expert digital analyst with 15+ years of experience in SEO, UX, Marketing, and Web Quality assessment.
+*** ROLE: SENIOR SEO SPECIALIST & DIGITAL STRATEGIST ***
+You are an expert with 15+ years analyzing websites across ALL industries globally.
 
-CRITICAL INSTRUCTIONS - READ CAREFULLY:
-1. You MUST fill ALL arrays with at least 5 items minimum
-2. NEVER return empty arrays [] or null values
-3. If data is not directly visible, make EDUCATED ESTIMATES based on industry standards
-4. Use your expertise to provide COMPLETE, DETAILED analysis
+🎯 PRIMARY DIRECTIVE: EXTRACT KEYWORDS FROM ACTUAL VISIBLE CONTENT ONLY
+
+UNIVERSAL CONTENT-FIRST ANALYSIS METHOD:
+
+STEP 1: TEXT EXTRACTION & READING
+First, READ and EXTRACT all visible text from the screenshots:
+- Main headline/hero text (usually largest font)
+- Subheadline or tagline
+- Navigation menu items (Home, About, Services, Products, etc.)
+- Button text (CTA buttons)
+- Section headings visible on page
+- Any visible paragraph text (first 2-3 lines are critical)
+- Footer text if visible
+
+STEP 2: BUSINESS IDENTIFICATION
+From the extracted text, identify:
+- What product/service is offered? (Look for verbs: "we provide", "we offer", "buy", "learn", etc.)
+- Who is the target audience? (Look for: "for businesses", "for students", "government", etc.)
+- What industry? (Extract from service names, technical terms used)
+- What makes them unique? (USP - any superlatives, specific claims)
+
+STEP 3: KEYWORD SEED GENERATION
+From the actual text you read, create keyword seeds:
+- Direct quote: If headline says "Your IT Partner", keyword = "IT Partner"
+- Service mention: If text says "Cloud Services", keyword = "Cloud Services"
+- Combined: If headline is "Online Learning Platform", keyword = "Online Learning Platform"
+- Problem-solution: If text says "Transform your business", keyword = "business transformation"
+
+STEP 4: SEARCH INTENT MAPPING
+For each seed keyword, expand to real search queries:
+- Brand: [company name] + [service type from text]
+- Niche: [specific technical term found] + [industry/location if mentioned]
+- Broad: [general industry category inferred from services]
+- Product: [specific product name mentioned]
+- Long-tail: "how to" + [problem mentioned in copy]
+
+STEP 5: LANGUAGE-AWARE OUTPUT
+- If website text is in Indonesian → Generate Indonesian keywords
+- If website text is in English → Generate English keywords
+- If mixed → Use primary language (most text in that language)
+- NEVER translate - use the SAME language as the source
+
+CRITICAL VALIDATION RULES:
+✅ EVERY keyword MUST be traceable to specific visible text
+✅ Relevance reason MUST cite exact text: "Hero headline states: '[exact quote]'"
+✅ If you cannot read text clearly, state: "Inferred from visual layout showing [describe what you see]"
+✅ NEVER use generic "[domain] official" unless that phrase appears on site
+✅ Match writing style: Formal site → formal keywords, casual site → casual keywords
+✅ Include location keywords ONLY if location is mentioned in text
+
+EXAMPLE OF CORRECT ANALYSIS:
+Visible text: "Belajar Coding Online - Kursus Programming Terlengkap"
+✅ CORRECT keywords: 
+   - "belajar coding online" (exact hero text)
+   - "kursus programming" (from headline)
+   - "platform pembelajaran coding" (industry category)
+   
+❌ WRONG keywords:
+   - "domain.com official" (not in text)
+   - "digital learning services" (wrong language)
+   - "education platform indonesia" (too generic, not specific to content)
 
 OUTPUT FORMAT (JSON Only - No markdown, no explanations):
 {
@@ -372,66 +445,73 @@ OUTPUT FORMAT (JSON Only - No markdown, no explanations):
     "overallSEO": {"score": 70-85, "visibility": "Medium/High", "recommendation": "specific_advice"},
     "technical_audit": {
       "score": 65-80,
-      "core_web_vitals_assessment": "LCP: X.Xs, FID: XXms, CLS: 0.XX with detailed interpretation",
-      "mobile_friendliness": "detailed mobile usability assessment",
-      "ssl_security": "security certificate status and recommendations",
-      "structured_data": "schema markup analysis"
+      "core_web_vitals_assessment": "LCP: X.Xs, FID: XXms, CLS: 0.XX with interpretation",
+      "mobile_friendliness": "Responsive/Not Responsive - describe what you see in mobile screenshot",
+      "ssl_security": "Check URL scheme - https = secure, http = not secure",
+      "structured_data": "Based on visible elements - forms, breadcrumbs, etc."
     },
     "keyword_analysis": {
+      "methodology": "Content-first extraction: Read visible text → Identify business type → Map search intent → Generate user-focused keywords",
+      "text_extraction_summary": "Briefly list key text you extracted: headline, menu items, main copy",
       "generated_keywords": [
-        {"keyword": "primary_keyword", "search_volume": "High/Medium/Low", "google_rank_est": 1-20, "intent": "Navigational/Informational/Transactional", "competition": "Low/Medium/High"},
-        {"keyword": "keyword_2", "search_volume": "High", "google_rank_est": 3, "intent": "Informational", "competition": "Medium"},
-        {"keyword": "keyword_3", "search_volume": "Medium", "google_rank_est": 5, "intent": "Transactional", "competition": "High"},
-        {"keyword": "keyword_4", "search_volume": "Medium", "google_rank_est": 8, "intent": "Navigational", "competition": "Low"},
-        {"keyword": "keyword_5", "search_volume": "Low", "google_rank_est": 12, "intent": "Informational", "competition": "Medium"}
+        {
+          "keyword": "[USE EXACT PHRASES FROM VISIBLE TEXT - 2-4 words]", 
+          "search_volume": "High/Medium/Low based on specificity", 
+          "google_rank_est": 1-25, 
+          "intent": "Navigational/Informational/Transactional", 
+          "competition": "Low/Medium/High",
+          "relevance_reason": "MUST cite exact source with quote: 'Hero headline states: [exact text]' OR 'Navigation menu shows: [exact item]' OR 'CTA button says: [exact text]'",
+          "keyword_type": "Brand/Niche/Broad/Product/Long-tail"
+        },
+        // ... 4 more keywords following same pattern
       ],
-      "ranking_analysis": "detailed 3-5 sentence explanation of ranking potential and competitive landscape"
+      "ranking_analysis": "4-5 sentences explaining: 1) What business model you identified from visible content, 2) Target audience inferred from language/tone/images, 3) Why these specific keywords match what users would search, 4) Competition analysis per keyword type, 5) Overall SEO strategy recommendation"
     }
   },
   "ui_ux": {
     "ui": {
       "overall": 70-85,
-      "design_style": "Modern/Traditional/Minimalist etc",
-      "color_palette": {"primary": "color", "secondary": "color", "evaluation": "assessment"},
-      "structure_audit": {"hero": "analysis", "nav": "analysis", "footer": "analysis", "cta": "analysis"}
+      "design_style": "Describe what you ACTUALLY SEE - Modern/Traditional/Minimalist/Colorful/Corporate/Playful etc",
+      "color_palette": {"primary": "describe dominant color", "secondary": "describe accent", "evaluation": "professional/vibrant/muted etc"},
+      "typography": "Describe font style you see - serif/sans-serif, modern/classic",
+      "layout_structure": "Describe actual layout - grid/asymmetric/centered/sidebar etc",
+      "visual_elements": "What images/graphics do you see - photos/illustrations/icons"
     },
     "ux": {
       "overall": 70-85,
       "academic_analysis": [
-        {"theory": "Jakob's Law", "source": "Nielsen Norman Group", "observation": "detailed 2-3 sentence observation", "application": "how it's applied", "impact": "user impact"},
-        {"theory": "Aesthetic-Usability Effect", "source": "Kurosu & Kashimura", "observation": "observation", "application": "application", "impact": "impact"},
-        {"theory": "Fitts's Law", "source": "Paul Fitts", "observation": "observation", "application": "application", "impact": "impact"},
-        {"theory": "Hick's Law", "source": "Hick & Hyman", "observation": "observation", "application": "application", "impact": "impact"},
-        {"theory": "Miller's Law", "source": "George Miller", "observation": "observation", "application": "application", "impact": "impact"}
-      ]
+        {"theory": "Jakob's Law", "source": "Nielsen Norman Group", "observation": "Based on ACTUAL navigation pattern you see in screenshot - describe it", "application": "how it's applied in THIS design", "impact": "user impact"},
+        // ... 4 more theories with SPECIFIC observations from THIS website
+      ],
+      "usability_observations": "What actual UX issues or strengths do you notice in the screenshots?"
     }
   },
   "marketing": {
     "overall": 3.0-4.5,
     "competitor_analysis": {
-      "competitor_name": "Main Competitor Name",
+      "competitor_name": "Based on industry you identified from content, name a logical competitor",
       "competitor_domain": "competitor.com",
       "comparison_7p": {
-        "product": {"us": "our offering", "competitor": "their offering", "verdict": "Better/Equal/Worse", "score_us": 3.0-5.0, "score_competitor": 3.0-5.0},
-        "price": {"us": "our pricing", "competitor": "their pricing", "verdict": "verdict", "score_us": 3.0-5.0, "score_competitor": 3.0-5.0},
-        "place": {"us": "our distribution", "competitor": "their distribution", "verdict": "verdict", "score_us": 3.0-5.0, "score_competitor": 3.0-5.0},
-        "promotion": {"us": "our marketing", "competitor": "their marketing", "verdict": "verdict", "score_us": 3.0-5.0, "score_competitor": 3.0-5.0},
-        "people": {"us": "our team", "competitor": "their team", "verdict": "verdict", "score_us": 3.0-5.0, "score_competitor": 3.0-5.0},
-        "process": {"us": "our processes", "competitor": "their processes", "verdict": "verdict", "score_us": 3.0-5.0, "score_competitor": 3.0-5.0},
-        "physical_evidence": {"us": "our evidence", "competitor": "their evidence", "verdict": "verdict", "score_us": 3.0-5.0, "score_competitor": 3.0-5.0}
+        "product": {"us": "describe what THIS site offers based on visible text", "competitor": "typical competitor offering", "verdict": "Better/Equal/Worse", "score_us": 3.0-5.0, "score_competitor": 3.0-5.0},
+        // ... other 6 P's
       },
-      "strategic_recommendation": "detailed strategic advice based on competitive analysis"
+      "strategic_recommendation": "Specific advice based on what you learned about THIS business from the screenshots"
     }
   },
   "webqual": {
-    "usability": {"score": 3.0-4.5, "pct": 60-90, "deep_reasoning": "detailed 3-4 sentence assessment"},
-    "information": {"score": 3.0-4.5, "pct": 60-90, "deep_reasoning": "detailed 3-4 sentence assessment"},
-    "service": {"score": 3.0-4.5, "pct": 60-90, "deep_reasoning": "detailed 3-4 sentence assessment"},
-    "overall": {"score": 3.0-4.5, "pct": 60-90, "calc": "calculation formula", "interpretation": "Excellent/Good/Fair/Needs Improvement"}
+    "usability": {"score": 3.0-4.5, "pct": 60-90, "deep_reasoning": "Based on navigation clarity, button visibility, form simplicity you SEE in screenshots"},
+    "information": {"score": 3.0-4.5, "pct": 60-90, "deep_reasoning": "Based on content organization, headings, text readability you SEE"},
+    "service": {"score": 3.0-4.5, "pct": 60-90, "deep_reasoning": "Based on contact options, CTA prominence, interactive elements you SEE"},
+    "overall": {"score": 3.0-4.5, "pct": 60-90, "calc": "formula", "interpretation": "Excellent/Good/Fair/Needs Improvement"}
   }
 }
 
-REMEMBER: Every array must have 5+ items. Every score must be realistic (60-90 range). Every text field must have detailed, specific content.
+ABSOLUTE REQUIREMENTS:
+1. READ the screenshots carefully - describe what you ACTUALLY see, not templates
+2. EXTRACT text verbatim - use exact quotes in relevance_reason
+3. LANGUAGE MATCH - if site text is Indonesian, all keywords must be Indonesian
+4. SPECIFIC not generic - "Belajar Coding" not "Education Platform"
+5. TRACEABLE - every keyword must cite exact visible source
     `;
 
     // Inject enhanced prompt
